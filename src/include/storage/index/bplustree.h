@@ -124,54 +124,54 @@ class BPlusTree {
    private:
     std::vector<std::pair<KeyType, std::list<ValueType>>> entries;
 
-   public:
-    /*
- * Begin() - Returns a begin iterator to its internal array
- */
-    inline typename std::vector<KeyValueListPair>::iterator begin() { return entries.begin(); }
+    // TODO: Optimize and use binary search
+    uint64_t GetPositionToInsert(const KeyType& key) {
+      int i;
 
-    inline typename std::vector<KeyValueListPair>::iterator begin() const { return entries.begin(); }
+      for (i = 0; i < entries.size(); i++) {
+        if (entries[i].first >= key) {
+          break;
+        }
+      }
 
-    /*
-     * End() - Returns an end iterator that is similar to the one for vector
-     */
-    inline typename std::vector<KeyValueListPair>::iterator end() { return entries.end(); }
-
-    inline const typename std::vector<KeyValueListPair>::iterator end() const { return entries.end(); }
-
-    /*
-     * REnd() - Returns the element before the first element
-     *
-     * Note that since we returned an invalid pointer into the array, the
-     * return value should not be modified and is therefore of const type
-     */
-    inline const typename std::vector<KeyValueListPair>::iterator rend() { return entries.rend(); }
-
-    inline const typename std::vector<KeyValueListPair>::iterator rend() const { return entries.rend(); }
-
-    /*
-     * GetSize() - Returns the size of the embedded list
-     *
-     * Note that the return type is integer since we use integer to represent
-     * the size of a node
-     */
-    inline int size() const { return entries.size(); }
-
-    inline void insert(const KeyType key, const ValueType value) {
-      // TODO : Search for correct position and insert value
+      return i;
     }
 
-    /*
-     * PushBack() - Push back a series of elements
-     *
-     * The overloaded PushBack() could also push an array of elements
-     */
-    inline void insert(const typename std::vector<KeyValueListPair>::iterator copy_start_p,
-                       const typename std::vector<KeyValueListPair>::iterator copy_end_p) {
-      // Make sure the loop will come to an end
-      TERRIER_ASSERT(copy_start_p <= copy_end_p, "Loop will not come to an end.");
+   public:
+    bool WillOverflow() {
+      uint64_t size = entries.size();
+      return (size >= FAN_OUT - 1);
+    }
 
-      entries.insert(entries.end(), copy_start_p, copy_end_p);
+    bool HasKey(const KeyType &key) {
+      // TODO: Optimize using STL function
+      for(auto it = entries.begin(); it != entries.end(); it++) {
+        if (it->first == key) return  true;
+      }
+
+      return false;
+    }
+
+    bool HasKeyValue(const KeyType &key, const ValueType &value) {
+      // TODO: Optimize using STL function
+      for (auto it = entries.begin(); it != entries.end(); it++) {
+        if (it->first == key && it->second == value) return true;
+      }
+
+      return false;
+    }
+
+    void Insert(const KeyType& key, const ValueType& value) {
+      uint64_t pos_to_insert = GetPositionToInsert(key);
+
+      if (pos_to_insert < entries.size() && entries[pos_to_insert].first == key) {
+        entries[pos_to_insert].second.push_back(value);
+      } else {
+        std::pair<KeyType, std::list<ValueType>> new_pair;
+        new_pair.first = key;
+        new_pair.second.push_back(value);
+        entries.insert(entries.begin() + pos_to_insert, new_pair);
+      }
     }
   };
 
@@ -179,51 +179,33 @@ class BPlusTree {
    private:
     std::vector<KeyNodePtrPair> entries;
 
+    // TODO: Optimize and use binary search
+    uint64_t GetPositionToInsert(const KeyType& key) {
+      int i;
+
+      for (i = 0; i < entries.size(); i++) {
+        if (entries[i].first >= key) {
+          break;
+        }
+      }
+
+      return i;
+    }
+
    public:
-    /*
- * Begin() - Returns a begin iterator to its internal array
- */
-    inline typename std::vector<KeyNodePtrPair>::iterator begin() { return entries.begin(); }
+    bool WillOverflow() {
+      uint64_t size = entries.size();
+      return (size >= FAN_OUT - 1);
+    }
 
-    inline const typename std::vector<KeyNodePtrPair>::iterator begin() const { return entries.begin(); }
+    void Insert(const KeyType& key, const Node* node_ptr) {
+      uint64_t pos_to_insert = GetPositionToInsert(key);
 
-    /*
-     * End() - Returns an end iterator that is similar to the one for vector
-     */
-    inline typename std::vector<KeyNodePtrPair>::iterator end() { return entries.end(); }
-
-    inline const typename std::vector<KeyNodePtrPair>::iterator end() const { return entries.end(); }
-
-    /*
-     * REnd() - Returns the element before the first element
-     *
-     * Note that since we returned an invalid pointer into the array, the
-     * return value should not be modified and is therefore of const type
-     */
-    inline const typename std::vector<KeyNodePtrPair>::iterator rend() { return entries.rend(); }
-
-    inline const typename std::vector<KeyNodePtrPair>::iterator rend() const { return entries.rend(); }
-
-    /*
-     * GetSize() - Returns the size of the embedded list
-     *
-     * Note that the return type is integer since we use integer to represent
-     * the size of a node
-     */
-    inline int size() const { return entries.size(); }
-
-    inline void insert(const KeyNodePtrPair &element) { entries.insert(element); }
-
-    /*
-     * PushBack() - Push back a series of elements
-     *
-     * The overloaded PushBack() could also push an array of elements
-     */
-    inline void insert(const typename std::vector<KeyNodePtrPair>::iterator copy_start_p,
-                       const typename std::vector<KeyNodePtrPair>::iterator copy_end_p) {
-      // Make sure the loop will come to an end
-      TERRIER_ASSERT(copy_start_p <= copy_end_p, "Loop will not come to an end.");
-      entries.insert(entries.end(), copy_start_p, copy_end_p);
+      // We are sure that there is no duplicate key
+      KeyNodePtrPair new_pair;
+      new_pair.first = key;
+      new_pair.second = node_ptr;
+      entries.insert(entries.begin() + pos_to_insert, new_pair);
     }
   };
 
@@ -232,46 +214,33 @@ class BPlusTree {
 
  public:
   void InsertAndPropagate(const KeyType &key, const ValueType &value, LeafNode* insert_node,
-      std::stack<Node*>& node_traceback) {
-    insert_node->insert(key, value);
+      std::stack<Node*> &node_traceback) {
 
+    bool will_overflow = insert_node->WillOverflow();
+
+    insert_node->Insert(key, value);
     // If insertion causes overflow
-    if (insert_node->isOverflow()) {
+    if (will_overflow) {
       // create new leaf node and insert key, value
       LeafNode* new_node = new LeafNode();
 
       // Move half of entries to the new node and update sibling pointers
-      insert_node->split(new_node);
+      insert_node->Split(new_node);
 
       Node* child_node = new_node;
 
-      while (!node_traceback.empty()) {
-        InnerNode* parent_node = dynamic_cast<InnerNode*> (node_traceback.top());
-        node_traceback.pop();
-
-        // Insert an entry for the child node in the parent node
-        parent_node->insert(child_node->getFirstKey(), child_node);
-
-        // If no overflow done with inserting
-        if (!parent_node->isOverflow()) {
-          break;
-        }
-
-        // Create a new node and split
-        new_node = new InnerNode();
-        parent_node->split(new_node);
-
-        // If split node is a root, we need to add a new root and link the splits
-        if (parent_node == root) {
-          root = new InnerNode();
-          root->insert(parent_node->getFirstKey(), parent_node);
-          root->insert(new_node->getFirstKey(), new_node);
-          break;
-        }
-
-        // Set as child node for next iteration
-        child_node = new_node;
+      if (insert_node == root) {
+        root = new InnerNode();
+        root->InsertNodePtr(child_node, node_traceback);
+        root->SetPrevPtr(insert_node);
+        return;
       }
+
+      InnerNode* parent_node = dynamic_cast<InnerNode*> (node_traceback.top());
+      node_traceback.pop();
+
+      // Insert the leaf node at the inner node and propagate
+      parent_node->InsertNodePtr(child_node, node_traceback);
     }
   }
 
@@ -282,13 +251,13 @@ class BPlusTree {
     // If tree is empty
     if (root == nullptr) {
       root = new LeafNode();
-      insert_node = &root;
+      insert_node = root;
     } else {
-      insert_node = findLeafNode(key, value, node_traceback);  // Node traceback passed as ref
+      insert_node = FindLeafNode(key, value, node_traceback);  // Node traceback passed as ref
     }
 
     // If there were conflicting key values
-    if (insert_node->hasKeyVal(key, value) || (unique_key && insert_node->hasKey(key))) {
+    if (insert_node->HasKeyVal(key, value) || (unique_key && insert_node->HasKey(key))) {
       return false;  // The traverse function aborts the insert as key, val is present
     }
 
@@ -307,11 +276,11 @@ class BPlusTree {
       root = new LeafNode();
       insert_node = &root;
     } else {
-      insert_node = findLeafNode(key, value, node_traceback);  // Node traceback passed as ref
+      insert_node = FindLeafNode(key, value, node_traceback);  // Node traceback passed as ref
     }
 
     // If there were conflicting key values
-    if (insert_node->satisfiesPredicate(predicate)) {
+    if (insert_node->SatisfiesPredicate(predicate)) {
       *predicate_satisfied = true;
       return false;  // The traverse function aborts the insert as key, val is present
     } else {
