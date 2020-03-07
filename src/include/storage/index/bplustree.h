@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include "common/spin_latch.h"
 #include "common/macros.h"
 #include <list>
 #include <vector>
@@ -22,6 +23,7 @@ template <typename KeyType, typename ValueType, typename KeyComparator = std::le
     typename ValueEqualityChecker = std::equal_to<ValueType>>
 class BPlusTree {
 
+  mutable common::SpinLatch tree_latch_;
   /*
    * class ElasticNode - The base class for elastic node types, i.e. InnerNode
    *                     and LeafNode
@@ -48,6 +50,7 @@ class BPlusTree {
     virtual Node* Split() = 0;
     virtual void SetPrevPtr(Node* ptr) = 0;
     virtual bool isLeaf() = 0;
+    virtual size_t GetHeapSpaceSubtree() = 0;
   };
 
   // Root of the tree
@@ -195,6 +198,15 @@ class BPlusTree {
         results.push_back(*i);
       }
     }
+
+    size_t GetHeapSpaceSubtree() {
+      size_t size = 0;
+      // Current node's heap space used
+      for (auto it = entries.begin(); it != entries.end(); ++it) {
+        size += (it->second).size() * sizeof(ValueType) + sizeof(KeyType);
+      }
+      return size;
+    }
   };
 
   class InnerNode: public Node {
@@ -326,6 +338,24 @@ class BPlusTree {
 
       return (entries.rbegin())->second;
     }
+
+    size_t GetHeapSpaceSubtree() {
+      size_t size = 0;
+
+      TERRIER_ASSERT(prev_ptr != nullptr, "There shouldn't be a node without prev ptr");
+      // Space for subtree pointed to by previous
+      size += prev_ptr->GetHeapSpaceSubtree();
+
+      // Current node's heap space used
+      size += (entries.capacity()) * sizeof(KeyNodePtrPair);
+
+      // For all children
+      for (auto it = entries.begin(); it != entries.end(); ++it) {
+        size += (it->second)->GetHeapSpaceSubtree();
+      }
+
+      return size;
+    }
   };
 
   LeafNode* FindLeafNode(const KeyType& key, std::stack<InnerNode*>& node_traceback) {
@@ -383,6 +413,8 @@ class BPlusTree {
   }
 
   bool Insert(const KeyType &key,const ValueType &value, bool unique_key) {
+    // Avoid races
+    common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
     std::stack<InnerNode*> node_traceback;
     LeafNode* insert_node;
 
@@ -406,6 +438,8 @@ class BPlusTree {
 
   bool ConditionalInsert(const KeyType &key, const ValueType &value, std::function<bool(const ValueType)> predicate,
                          bool *predicate_satisfied) {
+    // Avoid races
+    common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
     LeafNode* insert_node;
     std::stack<InnerNode*> node_traceback;
 
@@ -431,6 +465,9 @@ class BPlusTree {
   }
 
   void GetValue(const KeyType &key, typename std::vector<ValueType> &results) {
+    // Avoid races
+    common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
+
     LeafNode* node = FindLeafNode(key);
 
     if (node == nullptr) {
@@ -438,6 +475,14 @@ class BPlusTree {
     }
 
     node->ScanAndPopulateResults(key, results);
+  }
+
+  size_t GetHeapUsage() {
+    if (root == nullptr) {
+      return 0;
+    }
+
+    return root->GetHeapSpaceSubtree();
   }
 };
 }  // namespace terrier::storage::index
