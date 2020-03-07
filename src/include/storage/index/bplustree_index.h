@@ -41,7 +41,7 @@ class BPlusTreeIndex final : public Index {
 
   size_t GetHeapUsage() const final {
     // FIXME(15-721 project2): access the underlying data structure and report the heap usage
-    return 0;
+    return 1;
   }
 
   bool Insert(const common::ManagedPointer<transaction::TransactionContext> txn, const ProjectedRow &tuple,
@@ -138,6 +138,7 @@ class BPlusTreeIndex final : public Index {
 
     // Perform lookup in BPlusTree
     // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    bplustree_->GetValue(index_key, results);
 
     // Avoid resizing our value_list, even if it means over-provisioning
     value_list->reserve(results.size());
