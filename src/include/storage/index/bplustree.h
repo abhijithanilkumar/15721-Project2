@@ -12,84 +12,15 @@
 namespace terrier::storage::index {
 
 #define FAN_OUT 10
+// Ceil (FAN_OUT / 2) - 1
+#define MIN_KEYS_INNER_NODE 4
+// Ceil ((FAN_OUT - 1) / 2)
+#define MIN_KEYS_LEAF_NODE 5
 
 template <typename KeyType, typename ValueType, typename KeyComparator = std::less<KeyType>,
     typename KeyEqualityChecker = std::equal_to<KeyType>, typename KeyHashFunc = std::hash<KeyType>,
     typename ValueEqualityChecker = std::equal_to<ValueType>>
 class BPlusTree {
-  class KeyValuePairEqualityChecker;
-
-  /*
-   * enum class NodeType - Bw-Tree node type
-   */
-  enum class NodeType : short {
-    // We separate leaf and inner into two different intervals
-    // to make it possible for compiler to optimize
-    InnerType = 0,
-
-    // Only valid for inner
-    InnerInsertType = 1,
-    InnerDeleteType = 2,
-    InnerSplitType = 3,
-    InnerRemoveType = 4,
-    InnerMergeType = 5,
-    InnerAbortType = 6,  // Unconditional abort
-
-    LeafStart = 7,
-
-    // Data page type
-    LeafType = 7,
-
-    // Only valid for leaf
-    LeafInsertType = 8,
-    LeafSplitType = 9,
-    LeafDeleteType = 10,
-    LeafRemoveType = 11,
-    LeafMergeType = 12,
-  };
-
-
-/*
-  * class NodeMetaData - Holds node metadata in an object
-  *
-  * Node metadata includes a pointer to the range object, the depth
-  * of the current delta chain (NOTE: If there is a merge node then the
-  * depth is the sum of the length of its two children rather than
-  * the larger one)
-  *
-  * Since we need to query for high key and low key in every step of
-  * traversal down the tree (i.e. on each level we need to verify we
-  * are on the correct node). It would be wasteful if we traverse down the
-  * delta chain down to the bottom everytime to collect these metadata
-  * therefore as an optimization we store them inside each delta node
-  * and leaf/inner node to optimize for performance
-  *
-  * NOTE: We do not count node type as node metadata
-  */
-  class NodeMetaData {
-   public:
-    // The type of the node; this is forced to be represented as a short type
-    NodeType type;
-
-    // This is the depth of current delta chain
-    // For merge delta node, the depth of the delta chain is the
-    // sum of its two children
-    short depth;
-
-    // This counts the number of items alive inside the Node
-    // when consolidating nodes, we use this piece of information
-    // to reserve space for the new node
-    int item_count;
-
-    /*
-     * Constructor
-     */
-    NodeMetaData(NodeType p_type, int p_depth,
-                 int p_item_count)
-        : type{p_type},
-          depth{static_cast<short>(p_depth)},
-          item_count{p_item_count} {}
-  };
 
   /*
    * class ElasticNode - The base class for elastic node types, i.e. InnerNode
@@ -101,35 +32,47 @@ class BPlusTree {
    */
   class Node {
    private:
-    NodeMetaData metadata;
 
    public:
+
     /*
      * Constructor
      *
      * Note that this constructor uses the low key and high key stored as
      * members to initialize the NodeMetadata object in class BaseNode
      */
-    Node(NodeType p_type, int p_depth, int p_item_count)
-        : metadata(p_type, p_depth, p_item_count) {}
 
-   public:
+    Node() {}
+    ~Node() {}
 
+    virtual Node* Split() = 0;
+    virtual void SetPrevPtr(Node* ptr) = 0;
+    virtual bool isLeaf() = 0;
   };
 
+  // Root of the tree
+  Node* root;
   using KeyValueListPair = std::pair<KeyType, std::list<ValueType>>;
   using KeyNodePtrPair = std::pair<KeyType, Node*>;
 
   class LeafNode: public Node {
+
    private:
+    KeyComparator key_cmp_obj;
+    KeyEqualityChecker key_eq_chk;
+    ValueEqualityChecker val_eq_chk;
+
     std::vector<std::pair<KeyType, std::list<ValueType>>> entries;
+    // Sibling pointers
+    LeafNode *prev_ptr;
+    LeafNode *next_ptr;
 
     // TODO: Optimize and use binary search
     uint64_t GetPositionToInsert(const KeyType& key) {
       int i;
 
       for (i = 0; i < entries.size(); i++) {
-        if (entries[i].first >= key) {
+        if (key_cmp_obj(entries[i].first, key)) {
           break;
         }
       }
@@ -137,16 +80,38 @@ class BPlusTree {
       return i;
     }
 
+    typename std::vector<KeyValueListPair>::iterator GetPositionOfKey(const KeyType& key) {
+      auto it = entries.begin();
+
+      while(it != entries.end()) {
+        if (key_eq_chk((*it).first, key)) return it;
+        it++;
+      }
+
+      return it;
+    }
+
    public:
-    bool WillOverflow() {
+    LeafNode() {
+      prev_ptr = nullptr;
+      next_ptr = nullptr;
+    }
+
+    ~LeafNode() {}
+
+    bool IsOverflow() {
       uint64_t size = entries.size();
-      return (size >= FAN_OUT - 1);
+      return (size >= FAN_OUT);
+    }
+
+    void SetPrevPtr(Node* ptr) {
+      prev_ptr = dynamic_cast<LeafNode*>(ptr);
     }
 
     bool HasKey(const KeyType &key) {
       // TODO: Optimize using STL function
       for(auto it = entries.begin(); it != entries.end(); it++) {
-        if (it->first == key) return  true;
+        if (key_eq_chk(it->first, key)) return  true;
       }
 
       return false;
@@ -155,7 +120,11 @@ class BPlusTree {
     bool HasKeyValue(const KeyType &key, const ValueType &value) {
       // TODO: Optimize using STL function
       for (auto it = entries.begin(); it != entries.end(); it++) {
-        if (it->first == key && it->second == value) return true;
+        if (key_eq_chk(it->first, key)) {
+          for (auto val_iter = it->second.begin(); val_iter != it->second.end(); val_iter++) {
+            if (val_eq_chk(*val_iter, value)) return true;
+          }
+        }
       }
 
       return false;
@@ -164,7 +133,7 @@ class BPlusTree {
     void Insert(const KeyType& key, const ValueType& value) {
       uint64_t pos_to_insert = GetPositionToInsert(key);
 
-      if (pos_to_insert < entries.size() && entries[pos_to_insert].first == key) {
+      if (pos_to_insert < entries.size() && key_eq_chk(entries[pos_to_insert].first, key)) {
         entries[pos_to_insert].second.push_back(value);
       } else {
         std::pair<KeyType, std::list<ValueType>> new_pair;
@@ -173,18 +142,72 @@ class BPlusTree {
         entries.insert(entries.begin() + pos_to_insert, new_pair);
       }
     }
+
+    KeyType GetFirstKey() {
+      return entries[0].first;
+    }
+
+    Node* Split() {
+      LeafNode* new_node = new LeafNode();
+
+      // Copy the right half entries to the next node
+      new_node->Copy(entries.begin() + MIN_KEYS_LEAF_NODE + 1, entries.end());
+
+      // Erase the right half from the current node
+      entries.erase(entries.begin() + MIN_KEYS_LEAF_NODE + 1, entries.end());
+
+      // Set the forward sibling pointer of the current node
+      next_ptr = new_node;
+
+      // Set the backward sibling pointer of the new node
+      new_node->SetPrevPtr(this);
+
+      return new_node;
+    }
+
+    void Copy(typename std::vector<KeyValueListPair>::iterator begin,
+        typename std::vector<KeyValueListPair>::iterator end) {
+      entries.insert(entries.end(), begin, end);
+    }
+
+    bool SatisfiesPredicate(const KeyType& key, std::function<bool(const ValueType)> predicate) {
+      auto it = GetPositionOfKey(key);
+
+      if (it == entries.end()) return false;
+
+      for (auto i = (it->second).begin(); i != (it->second).end(); i++) {
+        if (predicate(*i)) return true;
+      }
+
+      return false;
+    }
+
+    bool isLeaf() {
+      return true;
+    }
   };
 
   class InnerNode: public Node {
    private:
     std::vector<KeyNodePtrPair> entries;
+    KeyComparator key_cmp_obj;
+    // n pointers, n-1 keys
+    Node* prev_ptr;
+
+   public:
+
+    InnerNode() {
+      prev_ptr = nullptr;
+    }
+
+    ~InnerNode() {}
 
     // TODO: Optimize and use binary search
-    uint64_t GetPositionToInsert(const KeyType& key) {
+    uint64_t GetPositionGreaterThanEqualTo(const KeyType& key) {
       int i;
 
       for (i = 0; i < entries.size(); i++) {
-        if (entries[i].first >= key) {
+        if (!key_cmp_obj(entries[i].first, key)) {
           break;
         }
       }
@@ -192,14 +215,13 @@ class BPlusTree {
       return i;
     }
 
-   public:
-    bool WillOverflow() {
+    bool IsOverflow() {
       uint64_t size = entries.size();
-      return (size >= FAN_OUT - 1);
+      return (size >= FAN_OUT);
     }
 
-    void Insert(const KeyType& key, const Node* node_ptr) {
-      uint64_t pos_to_insert = GetPositionToInsert(key);
+    void Insert(const KeyType& key, Node* node_ptr) {
+      uint64_t pos_to_insert = GetPositionGreaterThanEqualTo(key);
 
       // We are sure that there is no duplicate key
       KeyNodePtrPair new_pair;
@@ -207,32 +229,121 @@ class BPlusTree {
       new_pair.second = node_ptr;
       entries.insert(entries.begin() + pos_to_insert, new_pair);
     }
+
+    void SetPrevPtr(Node* node) {
+      prev_ptr = node;
+    }
+
+    void InsertNodePtr(Node* child_node, Node** tree_root, std::stack<InnerNode*> &node_traceback) {
+      InnerNode* current_node = this;
+      // Since child_node is always a leaf node, we do not remove first key here
+      TERRIER_ASSERT(child_node->isLeaf(), "child_node has to be a leaf node");
+      KeyType middle_key = dynamic_cast<LeafNode*>(child_node)->GetFirstKey();
+
+      // If current node is the root or has a parent
+      while (current_node == *tree_root || !node_traceback.empty()) {
+        // Insert child node into the current node
+        current_node->Insert(middle_key, child_node);
+
+        // Overflow
+        if (IsOverflow()) {
+          Node* new_node = current_node->Split();
+          middle_key = dynamic_cast<InnerNode*>(new_node)->RemoveFirstKey();
+
+          // Context we have is the left node
+          // new_node is the right node
+          if (current_node == *tree_root) {
+            TERRIER_ASSERT(node_traceback.empty(), "Stack should be empty when current node is the root");
+
+            auto new_root = new InnerNode();
+            // Will basically insert the key and node as node is empty
+            new_root->Insert(middle_key, new_node);
+            new_root->SetPrevPtr(current_node);
+            *tree_root = new_root;
+            return;
+          }
+
+          // Update current_node to the parent
+          current_node = node_traceback.top();
+          node_traceback.pop();
+          child_node = new_node;
+        }
+        else {
+          // Insertion does not cause overflow
+          break;
+        }
+      }
+    }
+
+    Node* Split() {
+      InnerNode* new_node = new InnerNode();
+
+      // Copy the right half entries into the new node
+      new_node->Copy(entries.begin() + MIN_KEYS_INNER_NODE + 1, entries.end());
+
+      // Delete the entries in the right half of the current node
+      entries.erase(entries.begin() + MIN_KEYS_INNER_NODE + 1, entries.end());
+
+      return new_node;
+    }
+
+    void Copy(typename std::vector<KeyNodePtrPair>::iterator begin,
+              typename std::vector<KeyNodePtrPair>::iterator end) {
+      entries.insert(entries.end(), begin, end);
+    }
+
+    KeyType RemoveFirstKey() {
+      KeyType first_key = entries[0].first;
+      entries.erase(entries.begin());
+      return first_key;
+    }
+
+    bool isLeaf() {
+      return false;
+    }
+
+    Node* GetNodePtrForKey(const KeyType& key) {
+      if(key_cmp_obj(key, (entries.begin())->first)) {
+        return prev_ptr;
+      }
+
+      for (auto it = entries.begin(); it+1 != entries.end(); it++) {
+        if (!this->key_cmp_obj(key, it->first) && this->key_cmp_obj(key, (it+1)->first)) {
+          return it->second;
+        }
+      }
+
+      return (entries.rbegin())->second;
+    }
   };
 
-  // Root of the tree
-  Node* root;
+  LeafNode* FindLeafNode(const KeyType& key, ValueType value, std::stack<InnerNode*>& node_traceback) {
+    Node* node = root;
 
- public:
+    while (!node->isLeaf()) {
+      InnerNode* inner_node = dynamic_cast<InnerNode*>(node);
+      node_traceback.push(inner_node);
+      node = inner_node->GetNodePtrForKey(key);
+    }
+
+    return dynamic_cast<LeafNode*>(node);
+  }
+
   void InsertAndPropagate(const KeyType &key, const ValueType &value, LeafNode* insert_node,
-      std::stack<Node*> &node_traceback) {
-
-    bool will_overflow = insert_node->WillOverflow();
-
+      std::stack<InnerNode*> &node_traceback) {
     insert_node->Insert(key, value);
     // If insertion causes overflow
-    if (will_overflow) {
-      // create new leaf node and insert key, value
-      LeafNode* new_node = new LeafNode();
+    if (insert_node->IsOverflow()) {
+      // Split the insert node and return the new (right) node with all values updated
+      LeafNode* child_node = dynamic_cast<LeafNode*>(insert_node->Split());
 
-      // Move half of entries to the new node and update sibling pointers
-      insert_node->Split(new_node);
-
-      Node* child_node = new_node;
-
+      // insert_node : left
+      // child_node : right
       if (insert_node == root) {
-        root = new InnerNode();
-        root->InsertNodePtr(child_node, node_traceback);
-        root->SetPrevPtr(insert_node);
+        auto new_root = new InnerNode();
+        new_root->Insert(child_node->GetFirstKey(), child_node);
+        new_root->SetPrevPtr(insert_node);
+        root = dynamic_cast<Node*>(new_root);
         return;
       }
 
@@ -240,24 +351,29 @@ class BPlusTree {
       node_traceback.pop();
 
       // Insert the leaf node at the inner node and propagate
-      parent_node->InsertNodePtr(child_node, node_traceback);
+      parent_node->InsertNodePtr(child_node, &root, node_traceback);
     }
   }
 
-  bool Insert(const KeyType &key, const ValueType &value, bool unique_key) {
-    std::stack<Node*> node_traceback;
+ public:
+  BPlusTree() {
+    root = nullptr;
+  }
+
+  bool Insert(const KeyType &key,const ValueType &value, bool unique_key) {
+    std::stack<InnerNode*> node_traceback;
     LeafNode* insert_node;
 
     // If tree is empty
     if (root == nullptr) {
       root = new LeafNode();
-      insert_node = root;
+      insert_node = dynamic_cast<LeafNode*>(root);
     } else {
       insert_node = FindLeafNode(key, value, node_traceback);  // Node traceback passed as ref
     }
 
     // If there were conflicting key values
-    if (insert_node->HasKeyVal(key, value) || (unique_key && insert_node->HasKey(key))) {
+    if (insert_node->HasKeyValue(key, value) || (unique_key && insert_node->HasKey(key))) {
       return false;  // The traverse function aborts the insert as key, val is present
     }
 
@@ -269,18 +385,18 @@ class BPlusTree {
   bool ConditionalInsert(const KeyType &key, const ValueType &value, std::function<bool(const ValueType)> predicate,
                          bool *predicate_satisfied) {
     LeafNode* insert_node;
-    std::stack<Node*> node_traceback;
+    std::stack<InnerNode*> node_traceback;
 
     // If tree is empty
     if (root == nullptr) {
-      root = new LeafNode();
-      insert_node = &root;
+      insert_node = new LeafNode();
+      root = insert_node;
     } else {
       insert_node = FindLeafNode(key, value, node_traceback);  // Node traceback passed as ref
     }
 
     // If there were conflicting key values
-    if (insert_node->SatisfiesPredicate(predicate)) {
+    if (insert_node->SatisfiesPredicate(key, predicate)) {
       *predicate_satisfied = true;
       return false;  // The traverse function aborts the insert as key, val is present
     } else {
