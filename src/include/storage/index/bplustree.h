@@ -22,6 +22,9 @@ template <typename KeyType, typename ValueType, typename KeyComparator = std::le
     typename KeyEqualityChecker = std::equal_to<KeyType>, typename KeyHashFunc = std::hash<KeyType>,
     typename ValueEqualityChecker = std::equal_to<ValueType>>
 class BPlusTree {
+  static inline KeyComparator key_cmp_obj{};
+  static inline KeyEqualityChecker key_eq_chk{};
+  static inline ValueEqualityChecker val_eq_chk{};
 
   mutable common::SpinLatch tree_latch_;
   /*
@@ -61,9 +64,7 @@ class BPlusTree {
   class LeafNode: public Node {
 
    private:
-    KeyComparator key_cmp_obj;
-    KeyEqualityChecker key_eq_chk;
-    ValueEqualityChecker val_eq_chk;
+    friend class BPlusTree;
 
     std::vector<std::pair<KeyType, std::list<ValueType>>> entries;
     // Sibling pointers
@@ -212,7 +213,8 @@ class BPlusTree {
   class InnerNode: public Node {
    private:
     std::vector<KeyNodePtrPair> entries;
-    KeyComparator key_cmp_obj;
+    friend class BPlusTree;
+
     // n pointers, n-1 keys
     Node* prev_ptr;
 
@@ -331,7 +333,7 @@ class BPlusTree {
       }
 
       for (auto it = entries.begin(); it+1 != entries.end(); it++) {
-        if (!this->key_cmp_obj(key, it->first) && this->key_cmp_obj(key, (it+1)->first)) {
+        if (!key_cmp_obj(key, it->first) && key_cmp_obj(key, (it+1)->first)) {
           return it->second;
         }
       }
