@@ -40,7 +40,7 @@ class BPlusTreeIndex final : public Index {
   }
 
   size_t GetHeapUsage() const final {
-    // FIXME(15-721 project2): access the underlying data structure and report the heap usage
+    // Access the B+ Tree and report the heap usage
     return bplustree_->GetHeapUsage();
   }
 
@@ -50,8 +50,7 @@ class BPlusTreeIndex final : public Index {
                    "This Insert is designed for secondary indexes with no uniqueness constraints.");
     KeyType index_key;
     index_key.SetFromProjectedRow(tuple, metadata_, metadata_.GetSchema().GetColumns().size());
-    // FIXME(15-721 project2): perform a non-unique unconditional insert into the underlying data structure of the
-    // key/value pair
+    // Perform a non-unique unconditional insert into the B+ Tree
 
     const bool result = bplustree_->Insert(index_key, location, false);
 
@@ -83,8 +82,7 @@ class BPlusTreeIndex final : public Index {
       return has_conflict || is_visible;
     };
 
-    // FIXME(15-721 project2): perform a non-unique CONDITIONAL insert into the underlying data structure of the
-    // key/value pair
+    // Perform a non-unique CONDITIONAL insert into the B+ Tree
     const bool result = bplustree_->ConditionalInsert(index_key, location, predicate, &predicate_satisfied);
 
     TERRIER_ASSERT(predicate_satisfied != result, "If predicate is not satisfied then insertion should succeed.");
@@ -137,7 +135,6 @@ class BPlusTreeIndex final : public Index {
     index_key.SetFromProjectedRow(key, metadata_, metadata_.GetSchema().GetColumns().size());
 
     // Perform lookup in BPlusTree
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
     bplustree_->GetValue(index_key, &results);
 
     // Avoid resizing our value_list, even if it means over-provisioning
