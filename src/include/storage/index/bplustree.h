@@ -414,7 +414,11 @@ class BPlusTree {
     root = nullptr;
   }
 
-  bool Insert(const KeyType &key,const ValueType &value, bool unique_key) {
+  Node* GetRoot() {
+    return root;
+  }
+
+  bool Insert(const KeyType &key,const ValueType &value, bool unique_key = false) {
     // Avoid races
     common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
     std::stack<InnerNode*> node_traceback;
