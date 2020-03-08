@@ -1,7 +1,7 @@
-#include "test_util/test_harness.h"
-#include "test_util/multithread_test_util.h"
 #include "storage/index/bplustree.h"
 #include "gtest/gtest.h"
+#include "test_util/multithread_test_util.h"
+#include "test_util/test_harness.h"
 
 namespace terrier::storage::index {
 
@@ -32,7 +32,7 @@ TEST_F(BPlusTreeTests, BasicInsertAndRootSplit) {
     tree->Insert(keys[i], keys[i]);
   }
 
-  EXPECT_TRUE(tree->GetRoot()->isLeaf());
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
 
   // Inserts the keys for the second time with different value
   for (int i = 0; i < 5; i++) {
@@ -40,7 +40,7 @@ TEST_F(BPlusTreeTests, BasicInsertAndRootSplit) {
   }
 
   // The root should not split as there are only 5 keys
-  EXPECT_TRUE(tree->GetRoot()->isLeaf());
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
 
   // Insert the other keys
   for (int i = 5; i < 15; i++) {
@@ -48,21 +48,18 @@ TEST_F(BPlusTreeTests, BasicInsertAndRootSplit) {
   }
 
   // The root must split and the new root must be an inner node
-  EXPECT_FALSE(tree->GetRoot()->isLeaf());
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
 
   int num_keys_one_val = 10;
   int num_keys_two_val = 5;
 
   size_t leaf_nodes_usage = sizeof(int64_t) * (num_keys_one_val * 2 + num_keys_two_val * 3);
   // Prev ptr is on stack, key, ptr pair is on the heap
-  size_t root_node_usage = sizeof(int64_t) + sizeof(void*);
+  size_t root_node_usage = sizeof(int64_t) + sizeof(void *);
 
   EXPECT_EQ(tree->GetHeapUsage(), leaf_nodes_usage + root_node_usage);
 
   delete tree;
 }
-
-
-
 
 }  // namespace terrier::storage::index
