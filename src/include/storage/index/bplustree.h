@@ -562,5 +562,48 @@ class BPlusTree {
 
     return height;
   }
+
+  // API to delete an entry in the tree
+  bool Delete(const KeyType &key, const ValueType &value) {
+    if (root_ == nullptr) return false;
+
+    std::stack<InnerNode *> node_traceback;
+    auto node = FindLeafNode(key, &node_traceback);
+
+    if (!node->HasKeyValue(key, value)) {return false;}
+
+    // Delete entry and propagate
+    node->DeleteEntry(key, value);
+
+    if (node == root_){
+      // Root is empty
+      if (node->GetSize() == 0) {
+        delete root_;
+        root_ = nullptr;
+      }
+      return true;
+    }
+
+    // Must propagate
+    if (node->IsUnderflow()) {
+      // Balance at leaf level
+      LeafNode *left_sibling = node->GetLeftSibling();
+      LeafNode *right_sibling = node->GetRightSibling();
+
+      if (left_sibling && !left_sibling->WillUnderFlow()) {
+        BorrowFromLeft(left_sibling, node, node_traceback.top());
+      } else if (right_sibling && !right_sibling->WillUnderFlow()) {
+        BorrowFromRight(right_sibling, node, node_traceback.top());
+      } else if (left_sibling) {
+        CoalesceToLeft(left_sibling, node, node_traceback.top());
+      } else {
+        TERRIER_ASSERT(right_sibling, "Tree has more than 1 level. If left sibling is not mergeable then right"
+                                      "must be");
+        CoalesceToRight(right_sibling, node, node_traceback.top());
+      }
+    }
+
+    return true;
+  }
 };
 }  // namespace terrier::storage::index
