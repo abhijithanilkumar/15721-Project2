@@ -42,6 +42,7 @@ class BPlusTree {
     virtual void SetPrevPtr(Node *ptr) = 0;
     virtual bool IsLeaf() = 0;
     virtual size_t GetHeapSpaceSubtree() = 0;
+    virtual Node* GetPrevPtr() = 0;
   };
 
   // Root of the tree
@@ -90,6 +91,10 @@ class BPlusTree {
     }
 
     ~LeafNode() = default;
+
+    Node* GetPrevPtr() override {
+      return prev_ptr_;
+    }
 
     bool IsOverflow() {
       uint64_t size = entries_.size();
@@ -203,6 +208,10 @@ class BPlusTree {
     InnerNode() { prev_ptr_ = nullptr; }
 
     ~InnerNode() = default;
+
+    Node* GetPrevPtr() override {
+      return prev_ptr_;
+    }
 
     // TODO(abhijithanilkumar): Optimize and use binary search
     uint64_t GetPositionGreaterThanEqualTo(const KeyType &key) {
@@ -458,5 +467,22 @@ class BPlusTree {
 
     return root_->GetHeapSpaceSubtree();
   }
+
+  size_t GetHeightOfTree() {
+    size_t height = 1;
+
+    Node* node = root_;
+
+    if (node == NULL)
+      return 0;
+
+    while (!node->IsLeaf()) {
+      height++;
+      node = node->GetPrevPtr();
+    }
+
+    return height;
+  }
+
 };
 }  // namespace terrier::storage::index
