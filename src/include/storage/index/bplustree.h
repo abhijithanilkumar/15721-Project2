@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <iterator>
-#include <list>
+#include <unordered_set>
 #include <stack>
 #include <utility>
 #include <vector>
@@ -19,7 +19,7 @@ namespace terrier::storage::index {
 
 template <typename KeyType, typename ValueType, typename KeyComparator = std::less<KeyType>,
           typename KeyEqualityChecker = std::equal_to<KeyType>, typename KeyHashFunc = std::hash<KeyType>,
-          typename ValueEqualityChecker = std::equal_to<ValueType>>
+          typename ValueEqualityChecker = std::equal_to<ValueType>, typename ValueHashFunc = std::hash<ValueType>>
 class BPlusTree {
   // static definition of comparators and equality checkers
   constexpr static const KeyComparator KEY_CMP_OBJ{};
@@ -46,14 +46,15 @@ class BPlusTree {
 
   // Root of the tree
   Node *root_;
-  using KeyValueListPair = std::pair<KeyType, std::list<ValueType>>;
+  using ValueSet = std::unordered_set<ValueType, ValueHashFunc, ValueEqualityChecker>;
+  using KeyValueSetPair = std::pair<KeyType, ValueSet>;
   using KeyNodePtrPair = std::pair<KeyType, Node *>;
 
   class LeafNode : public Node {
    private:
     friend class BPlusTree;
 
-    std::vector<std::pair<KeyType, std::list<ValueType>>> entries_;
+    std::vector<KeyValueSetPair> entries_;
     // Sibling pointers
     LeafNode *prev_ptr_;
     LeafNode *next_ptr_;
@@ -71,7 +72,7 @@ class BPlusTree {
       return i;
     }
 
-    typename std::vector<KeyValueListPair>::iterator GetPositionOfKey(const KeyType &key) {
+    typename std::vector<KeyValueSetPair>::iterator GetPositionOfKey(const KeyType &key) {
       auto it = entries_.begin();
 
       while (it != entries_.end()) {
@@ -110,9 +111,8 @@ class BPlusTree {
       // TODO(abhijithanilkumar): Optimize using STL function
       for (auto it = entries_.begin(); it != entries_.end(); it++) {
         if (KEY_EQ_CHK(it->first, key)) {
-          for (auto val_iter = it->second.begin(); val_iter != it->second.end(); val_iter++) {
-            if (VAL_EQ_CHK(*val_iter, value)) return true;
-          }
+          auto loc = it->second.find(value);
+          if (loc != it->second.end()) return true;
         }
       }
 
@@ -123,11 +123,11 @@ class BPlusTree {
       uint64_t pos_to_insert = GetPositionToInsert(key);
 
       if (pos_to_insert < entries_.size() && KEY_EQ_CHK(entries_[pos_to_insert].first, key)) {
-        entries_[pos_to_insert].second.push_back(value);
+        entries_[pos_to_insert].second.insert(value);
       } else {
-        std::pair<KeyType, std::list<ValueType>> new_pair;
+        KeyValueSetPair new_pair;
         new_pair.first = key;
-        new_pair.second.push_back(value);
+        new_pair.second.insert(value);
         entries_.insert(entries_.begin() + pos_to_insert, new_pair);
       }
     }
@@ -152,8 +152,8 @@ class BPlusTree {
       return new_node;
     }
 
-    void Copy(typename std::vector<KeyValueListPair>::iterator begin,
-              typename std::vector<KeyValueListPair>::iterator end) {
+    void Copy(typename std::vector<KeyValueSetPair>::iterator begin,
+              typename std::vector<KeyValueSetPair>::iterator end) {
       entries_.insert(entries_.end(), begin, end);
     }
 
