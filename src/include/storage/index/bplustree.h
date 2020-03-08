@@ -2,8 +2,8 @@
 
 #include <functional>
 #include <iterator>
-#include <unordered_set>
 #include <stack>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include "common/macros.h"
@@ -17,6 +17,44 @@ namespace terrier::storage::index {
 // Ceil ((FAN_OUT - 1) / 2)
 #define MIN_KEYS_LEAF_NODE 5
 
+/*
+ * BPlusTree - Implementation of a B+ Tree index
+ *
+ * Template Arguments:
+ *
+ * template <typename KeyType,
+ *           typename ValueType,
+ *           typename KeyComparator = std::less<KeyType>,
+ *           typename KeyEqualityChecker = std::equal_to<KeyType>,
+ *           typename KeyHashFunc = std::hash<KeyType>,
+ *           typename ValueEqualityChecker = std::equal_to<ValueType>,
+ *           typename ValueHashFunc = std::hash<ValueType>>
+ *
+ * Explanation:
+ *
+ *  - KeyType: Key type of the map
+ *
+ *  - ValueType: Value type of the map. Note that it is possible
+ *               that a single key is mapped to multiple values
+ *
+ *  - KeyComparator: "less than" relation comparator for KeyType
+ *                   Returns true if "less than" relation holds
+ *                   *** NOTE: THIS OBJECT DO NOT NEED TO HAVE A DEFAULT
+ *                   CONSTRUCTOR.
+ *                   Please refer to main.cpp, class KeyComparator for more
+ *                   information on how to define a proper key comparator
+ *
+ *  - KeyEqualityChecker: Equality checker for KeyType
+ *                        Returns true if two keys are equal
+ *
+ *  - KeyHashFunc: Hashes KeyType into size_t. This is used in unordered_set
+ *
+ *  - ValueEqualityChecker: Equality checker for value type
+ *                          Returns true for ValueTypes that are equal
+ *
+ *  - ValueHashFunc: Hashes ValueType into a size_t
+ *                   This is used in unordered_set
+ */
 template <typename KeyType, typename ValueType, typename KeyComparator = std::less<KeyType>,
           typename KeyEqualityChecker = std::equal_to<KeyType>, typename KeyHashFunc = std::hash<KeyType>,
           typename ValueEqualityChecker = std::equal_to<ValueType>, typename ValueHashFunc = std::hash<ValueType>>
@@ -27,6 +65,7 @@ class BPlusTree {
   constexpr static const ValueEqualityChecker VAL_EQ_CHK{};
   // Global latch for the entire tree
   mutable common::SpinLatch tree_latch_;
+
   /*
    * class Node - The base class for node types, i.e. InnerNode and LeafNode
    *
@@ -42,24 +81,30 @@ class BPlusTree {
     virtual void SetPrevPtr(Node *ptr) = 0;
     virtual bool IsLeaf() = 0;
     virtual size_t GetHeapSpaceSubtree() = 0;
-    virtual Node* GetPrevPtr() = 0;
+    virtual Node *GetPrevPtr() = 0;
   };
 
   // Root of the tree
   Node *root_;
+  // Datatypes for representing Node contents
   using ValueSet = std::unordered_set<ValueType, ValueHashFunc, ValueEqualityChecker>;
   using KeyValueSetPair = std::pair<KeyType, ValueSet>;
   using KeyNodePtrPair = std::pair<KeyType, Node *>;
 
+  /*
+   * LeafNode represents the leaf in the B+ Tree, storing the actual values in the index
+   */
   class LeafNode : public Node {
    private:
     friend class BPlusTree;
 
+    // Each key has a list of values stored as an unordered set
     std::vector<KeyValueSetPair> entries_;
     // Sibling pointers
     LeafNode *prev_ptr_;
     LeafNode *next_ptr_;
 
+    // Find the sorted position for a new key
     // TODO(abhijithanilkumar): Optimize and use binary search
     uint64_t GetPositionToInsert(const KeyType &key) {
       int i;
@@ -73,6 +118,7 @@ class BPlusTree {
       return i;
     }
 
+    // Return an iterator to the position of the key
     typename std::vector<KeyValueSetPair>::iterator GetPositionOfKey(const KeyType &key) {
       auto it = entries_.begin();
 
@@ -92,17 +138,19 @@ class BPlusTree {
 
     ~LeafNode() = default;
 
-    Node* GetPrevPtr() override {
-      return prev_ptr_;
-    }
+    // Returns the prev_ptr for the node
+    Node *GetPrevPtr() override { return prev_ptr_; }
 
+    // Check if the given node has overflown
     bool IsOverflow() {
       uint64_t size = entries_.size();
       return (size >= FAN_OUT);
     }
 
+    // Set the previous pointer for the leaf node
     void SetPrevPtr(Node *ptr) override { prev_ptr_ = dynamic_cast<LeafNode *>(ptr); }
 
+    // Check if the given key is present in the node
     bool HasKey(const KeyType &key) {
       // TODO(abhijithanilkumar): Optimize using STL function
       for (auto it = entries_.begin(); it != entries_.end(); it++) {
@@ -112,6 +160,7 @@ class BPlusTree {
       return false;
     }
 
+    // Check if the given (key, value) pair is present in the node
     bool HasKeyValue(const KeyType &key, const ValueType &value) {
       // TODO(abhijithanilkumar): Optimize using STL function
       for (auto it = entries_.begin(); it != entries_.end(); it++) {
@@ -124,6 +173,7 @@ class BPlusTree {
       return false;
     }
 
+    // Insert a new (key, value) pair into the leaf node
     void Insert(const KeyType &key, const ValueType &value) {
       uint64_t pos_to_insert = GetPositionToInsert(key);
 
@@ -137,8 +187,10 @@ class BPlusTree {
       }
     }
 
+    // Returns the first key in the leaf node
     KeyType GetFirstKey() { return entries_[0].first; }
 
+    // Split the node into two, return the new node and set sibling pointers
     Node *Split() override {
       auto new_node = new LeafNode();
 
@@ -157,11 +209,13 @@ class BPlusTree {
       return new_node;
     }
 
+    // Used to copy new values into the leaf node
     void Copy(typename std::vector<KeyValueSetPair>::iterator begin,
               typename std::vector<KeyValueSetPair>::iterator end) {
       entries_.insert(entries_.end(), begin, end);
     }
 
+    // Check if values in a key satisfies predicate, used for Conditional Insert
     bool SatisfiesPredicate(const KeyType &key, std::function<bool(const ValueType)> predicate) {
       auto it = GetPositionOfKey(key);
 
@@ -174,8 +228,10 @@ class BPlusTree {
       return false;
     }
 
+    // Returns true, since this is a leaf node
     bool IsLeaf() override { return true; }
 
+    // Populate the values in a key to a vector
     void ScanAndPopulateResults(const KeyType &key, typename std::vector<ValueType> *results) {
       auto it = GetPositionOfKey(key);
 
@@ -186,6 +242,7 @@ class BPlusTree {
       }
     }
 
+    // Calculate the heap usage of the leaf node
     size_t GetHeapSpaceSubtree() override {
       size_t size = 0;
       // Current node's heap space used
@@ -196,10 +253,14 @@ class BPlusTree {
     }
   };
 
+  /*
+   * InnerNode represents one of the nodes in the non-leaf levels of the B+ Tree.
+   */
   class InnerNode : public Node {
    private:
-    std::vector<KeyNodePtrPair> entries_;
     friend class BPlusTree;
+    // Node contains a vector of (key, ptr) pairs
+    std::vector<KeyNodePtrPair> entries_;
 
     // n pointers, n-1 keys
     Node *prev_ptr_;
@@ -209,10 +270,10 @@ class BPlusTree {
 
     ~InnerNode() = default;
 
-    Node* GetPrevPtr() override {
-      return prev_ptr_;
-    }
+    // Returns the prev_ptr
+    Node *GetPrevPtr() override { return prev_ptr_; }
 
+    // Returns the position preater than equal to the given key
     // TODO(abhijithanilkumar): Optimize and use binary search
     uint64_t GetPositionGreaterThanEqualTo(const KeyType &key) {
       int i;
@@ -226,11 +287,13 @@ class BPlusTree {
       return i;
     }
 
+    // Check if the node has overflown
     bool IsOverflow() {
       uint64_t size = entries_.size();
       return (size >= FAN_OUT);
     }
 
+    // Insert a new (key, ptr) pair into the node
     void Insert(const KeyType &key, Node *node_ptr) {
       uint64_t pos_to_insert = GetPositionGreaterThanEqualTo(key);
 
@@ -241,8 +304,10 @@ class BPlusTree {
       entries_.insert(entries_.begin() + pos_to_insert, new_pair);
     }
 
+    // Set pre_ptr for the inner node (this will point to a node in the lower level)
     void SetPrevPtr(Node *node) override { prev_ptr_ = node; }
 
+    // Insert the new node appropriately in the tree, propagating the changes up till root if necessary
     void InsertNodePtr(Node *child_node, Node **tree_root, std::stack<InnerNode *> *node_traceback) {
       InnerNode *current_node = this;
       // Since child_node is always a leaf node, we do not remove first key here
@@ -283,6 +348,7 @@ class BPlusTree {
       }
     }
 
+    // Split the inner node and return the new node created
     Node *Split() override {
       auto new_node = new InnerNode();
 
@@ -295,11 +361,13 @@ class BPlusTree {
       return new_node;
     }
 
+    // Used to copy new values into the node
     void Copy(typename std::vector<KeyNodePtrPair>::iterator begin,
               typename std::vector<KeyNodePtrPair>::iterator end) {
       entries_.insert(entries_.end(), begin, end);
     }
 
+    // Removes the first element in the node, used during insert overflow
     KeyType RemoveFirstKey() {
       prev_ptr_ = entries_[0].second;
       KeyType first_key = entries_[0].first;
@@ -307,8 +375,10 @@ class BPlusTree {
       return first_key;
     }
 
+    // Returns false because this is an inner node
     bool IsLeaf() override { return false; }
 
+    // Returns the pointer corresponding to the key, used to traverse
     Node *GetNodePtrForKey(const KeyType &key) {
       if (KEY_CMP_OBJ(key, (entries_.begin())->first)) {
         return prev_ptr_;
@@ -323,6 +393,7 @@ class BPlusTree {
       return (entries_.rbegin())->second;
     }
 
+    // Calculate the space used by the subtree starting at this node
     size_t GetHeapSpaceSubtree() override {
       size_t size = 0;
 
@@ -342,6 +413,7 @@ class BPlusTree {
     }
   };
 
+  // Traverse and find the leaf node that has the given key, populate the stack to store the path
   LeafNode *FindLeafNode(const KeyType &key, std::stack<InnerNode *> *node_traceback) {
     Node *node = root_;
 
@@ -354,6 +426,7 @@ class BPlusTree {
     return dynamic_cast<LeafNode *>(node);
   }
 
+  // Traverse the tree to find the leaf node that has the given key
   LeafNode *FindLeafNode(const KeyType &key) {
     Node *node = root_;
 
@@ -365,6 +438,7 @@ class BPlusTree {
     return dynamic_cast<LeafNode *>(node);
   }
 
+  // Insert a new (key, value) pair in the tree and rebalance the tree
   void InsertAndPropagate(const KeyType &key, const ValueType &value, LeafNode *insert_node,
                           std::stack<InnerNode *> *node_traceback) {
     insert_node->Insert(key, value);
@@ -394,8 +468,10 @@ class BPlusTree {
  public:
   BPlusTree() { root_ = nullptr; }
 
+  // Returns the root of the B+ tree
   Node *GetRoot() { return root_; }
 
+  // API to insert a new (key, value) pair into the tree
   bool Insert(const KeyType &key, const ValueType &value, bool unique_key = false) {
     // Avoid races
     common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
@@ -420,6 +496,7 @@ class BPlusTree {
     return true;
   }
 
+  // API to perform (key, value) pair insert based on a predicate into the tree
   bool ConditionalInsert(const KeyType &key, const ValueType &value, std::function<bool(const ValueType)> predicate,
                          bool *predicate_satisfied) {
     // Avoid races
@@ -447,6 +524,7 @@ class BPlusTree {
     return true;
   }
 
+  // API to fetch the values stored in the corresponding key and populate a vector with it
   void GetValue(const KeyType &key, typename std::vector<ValueType> *results) {
     // Avoid races
     common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
@@ -460,6 +538,7 @@ class BPlusTree {
     node->ScanAndPopulateResults(key, results);
   }
 
+  // API to calculate heap usage
   size_t GetHeapUsage() {
     if (root_ == nullptr) {
       return 0;
@@ -468,13 +547,13 @@ class BPlusTree {
     return root_->GetHeapSpaceSubtree();
   }
 
+  // API to get the height of the tree
   size_t GetHeightOfTree() {
     size_t height = 1;
 
-    Node* node = root_;
+    Node *node = root_;
 
-    if (node == NULL)
-      return 0;
+    if (node == nullptr) return 0;
 
     while (!node->IsLeaf()) {
       height++;
@@ -483,6 +562,5 @@ class BPlusTree {
 
     return height;
   }
-
 };
 }  // namespace terrier::storage::index
