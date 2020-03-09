@@ -570,4 +570,38 @@ TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
 
   delete tree;
 }
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, RootInnerToLeaf) {
+  const uint32_t key_num = FAN_OUT * FAN_OUT;
+
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
+
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
+
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+
+  for (int i = 0; i < key_num; i++) {
+    tree->Insert(keys[i], keys[i]);
+  }
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  for (int i = 0; i < key_num - 1; i++) {
+    tree->Delete(keys[i], keys[i]);
+  }
+
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+
+  tree->Delete(keys[key_num-1], keys[key_num-1]);
+
+  EXPECT_EQ(tree->GetRoot(), nullptr);
+}
+
 }  // namespace terrier::storage::index
