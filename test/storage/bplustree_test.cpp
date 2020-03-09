@@ -573,7 +573,7 @@ TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, RootInnerToLeaf) {
-  const uint32_t key_num = FAN_OUT * FAN_OUT;
+  const uint32_t key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 

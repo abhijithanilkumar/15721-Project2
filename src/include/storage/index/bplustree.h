@@ -875,8 +875,8 @@ class BPlusTree {
           auto tmp = root_;
           root_ = root_->GetPrevPtr();
           delete tmp;
-          return;
         }
+        return;
       }
 
       parent_node = node_traceback->top();
