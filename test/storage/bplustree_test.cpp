@@ -434,13 +434,13 @@ TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
 }
 
 // NOLINTNEXTLINE
-TEST_F(BPlusTreeTests, CoalesceInnerNode) {
-  const uint32_t key_num = FAN_OUT;
+TEST_F(BPlusTreeTests, BorrowInnerNode) {
+  const uint32_t key_num = 55;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
   // Inserts the keys
-  for (int i = 0; i < 55; i++) {
+  for (int i = 0; i < key_num; i++) {
     EXPECT_TRUE(tree->Insert(i, i));
   }
 
@@ -467,23 +467,8 @@ TEST_F(BPlusTreeTests, CoalesceInnerNode) {
 
   EXPECT_EQ(results.size(), 0);
 
-  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+  EXPECT_EQ(tree->GetHeightOfTree(), 3);
 
-  // Borrow from left
-  EXPECT_TRUE(tree->Insert(0, 0));
-
-  EXPECT_TRUE(tree->Delete(FAN_OUT, FAN_OUT));
-
-  for (int i = 0; i < key_num; i++) {
-    std::vector<int64_t> results1;
-    tree->GetValue(i, &results1);
-    EXPECT_EQ(results1.size(), 1);
-    EXPECT_EQ(results1[0], i);
-  }
-
-  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
-
-  EXPECT_EQ(tree->GetHeightOfTree(), 2);
 
   delete tree;
 }
