@@ -264,4 +264,116 @@ TEST_F(BPlusTreeTests, InnerNodeSplit) {
 
   delete tree;
 }
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, SimpleDelete) {
+  const uint32_t key_num = FAN_OUT - 1;
+
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
+
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
+
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+
+  EXPECT_EQ(tree->GetRoot(), nullptr);
+
+  // Inserts the keys
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_TRUE(tree->Insert(keys[i], keys[i]));
+  }
+
+  // The root node should not have split
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_EQ(tree->GetRoot()->GetSize(), key_num - i);
+    EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
+  }
+
+  EXPECT_EQ(tree->GetRoot(), nullptr);
+
+  delete tree;
+}
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, MultiValueDelete) {
+  const uint32_t key_num = FAN_OUT - 1;
+
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
+
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
+
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+
+  EXPECT_EQ(tree->GetRoot(), nullptr);
+
+  // Inserts the keys
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_TRUE(tree->Insert(keys[i], keys[i]));
+    EXPECT_TRUE(tree->Insert(keys[i], keys[i] + 1));
+  }
+
+  // The root node should not have split
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_EQ(tree->GetRoot()->GetSize(), key_num - i);
+    EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
+    EXPECT_EQ(tree->GetRoot()->GetSize(), key_num - i);
+    EXPECT_TRUE(tree->Delete(keys[i], keys[i] + 1));
+  }
+
+  EXPECT_EQ(tree->GetRoot(), nullptr);
+
+  delete tree;
+}
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, CoalesceLeavesOnDelete) {
+  const uint32_t key_num = FAN_OUT;
+
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  // Inserts the keys
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_TRUE(tree->Insert(i, i));
+  }
+
+  // The root node should have split
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_TRUE(tree->Delete(0, 0));
+
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+  EXPECT_EQ(tree->GetRoot()->GetSize(), FAN_OUT - 1);
+
+  tree->Insert(0, 0);
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_TRUE(tree->Delete(FAN_OUT - 1, FAN_OUT - 1));
+
+  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+  EXPECT_EQ(tree->GetRoot()->GetSize(), FAN_OUT - 1);
+
+  // Ensure all values are present
+  for (int i = 0; i < key_num - 1; i++) {
+    std::vector<int64_t> results;
+    tree->GetValue(i, &results);
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results[0], i);
+  }
+
+  delete tree;
+}
 }  // namespace terrier::storage::index
