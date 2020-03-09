@@ -303,16 +303,16 @@ class BPlusTree {
 
     // Remove the last (key, val) pair from the node and return it
     KeyValueSetPair  RemoveLastKeyValPair() {
-      auto last_key_val_pair = entries_.rbegin();
+      auto last_key_val_pair = *entries_.rbegin();
       entries_.erase(entries_.end() - 1);
-      return  *last_key_val_pair;
+      return  last_key_val_pair;
     }
 
     // Remove the first (key, val) pair from the node and return it
     KeyValueSetPair  RemoveFirstKeyValPair() {
-      auto first_key_val_pair = entries_.begin();
+      auto first_key_val_pair = *entries_.begin();
       entries_.erase(entries_.begin());
-      return *first_key_val_pair;
+      return first_key_val_pair;
     }
 
     // Delete the corresponding (key, value) entry from the node
@@ -325,6 +325,14 @@ class BPlusTree {
         entries_.erase(key_iter);
       }
       return;
+    }
+
+    LeafNode *GetNextPtr() {
+      return next_ptr_;
+    }
+
+    void SetNextPtr(LeafNode *node) {
+      next_ptr_ = node;
     }
   };
 
@@ -586,16 +594,16 @@ class BPlusTree {
 
     // Remove the last (key, ptr) pair from the node and return it
     KeyNodePtrPair RemoveLastKeyNodePtrPair() {
-      auto last_key_ptr_pair = entries_.rbegin();
+      auto last_key_ptr_pair = *entries_.rbegin();
       entries_.erase(entries_.end() - 1);
-      return *last_key_ptr_pair;
+      return last_key_ptr_pair;
     }
 
     // Remove the first (key, ptr) pair from the node and return it
     KeyNodePtrPair RemoveFirstKeyNodePtrPair() {
-      auto first_key_ptr_pair = entries_.begin();
+      auto first_key_ptr_pair = *entries_.begin();
       entries_.erase(entries_.begin());
-      return *first_key_ptr_pair;
+      return first_key_ptr_pair;
     }
 
     // Delete the corresponding (key, value) entry from the node
@@ -810,9 +818,9 @@ class BPlusTree {
   }
 
   // Balance a tree on deletion at leaf node
-  void Balance(LeafNode* node, std::stack<InnerNode *>& node_traceback) {
+  void Balance(LeafNode* node, std::stack<InnerNode *> *node_traceback) {
     // Handle leaf merge separately
-    auto parent_node = node_traceback.top();
+    auto parent_node = node_traceback->top();
     auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
     auto right_sibling = dynamic_cast<LeafNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
 
@@ -830,13 +838,21 @@ class BPlusTree {
     // Parent node entry for child is also deleted
     if (left_sibling) {
       Coalesce(node, left_sibling, parent_node);
+      left_sibling->SetNextPtr(node->GetNextPtr());
+      if (node->GetNextPtr()) {
+        node->GetNextPtr()->SetPrevPtr(left_sibling);
+      }
       delete node;
     } else {
       Coalesce(right_sibling, node, parent_node);
+      node->SetNextPtr(right_sibling->GetNextPtr());
+      if (right_sibling->GetNextPtr()) {
+        right_sibling->GetNextPtr()->SetPrevPtr(node);
+      }
       delete right_sibling;
     }
 
-    node_traceback.pop();
+    node_traceback->pop();
 
     // Handle inner nodes now
     auto inner_node = parent_node;
@@ -852,8 +868,8 @@ class BPlusTree {
         }
       }
 
-      parent_node = node_traceback.top();
-      node_traceback.pop();
+      parent_node = node_traceback->top();
+      node_traceback->pop();
       auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
       auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
 
@@ -904,7 +920,7 @@ class BPlusTree {
     // Must propagate
     if (node->IsUnderflow()) {
       // Balance at leaf level
-      Balance(node, node_traceback);
+      Balance(node, &node_traceback);
     }
 
     return true;

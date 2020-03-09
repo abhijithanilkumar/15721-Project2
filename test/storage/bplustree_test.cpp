@@ -376,4 +376,115 @@ TEST_F(BPlusTreeTests, CoalesceLeavesOnDelete) {
 
   delete tree;
 }
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
+  const uint32_t key_num = FAN_OUT;
+
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  // Inserts the keys
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_TRUE(tree->Insert(i, i));
+  }
+
+  // The root node should have split
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_TRUE(tree->Insert(FAN_OUT, FAN_OUT));
+
+  EXPECT_TRUE(tree->Delete(0, 0));
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_EQ(tree->GetRoot()->GetPrevPtr()->GetSize(), MIN_KEYS_LEAF_NODE);
+
+  // Ensure all values are present
+  for (int i = 1; i < key_num + 1; i++) {
+    std::vector<int64_t> results;
+    tree->GetValue(i, &results);
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results[0], i);
+  }
+
+  std::vector<int64_t> results;
+  tree->GetValue(0, &results);
+
+  EXPECT_EQ(results.size(), 0);
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+
+  // Borrow from left
+  EXPECT_TRUE(tree->Insert(0, 0));
+
+  EXPECT_TRUE(tree->Delete(FAN_OUT, FAN_OUT));
+
+  for (int i = 0; i < key_num; i++) {
+    std::vector<int64_t> results1;
+    tree->GetValue(i, &results1);
+    EXPECT_EQ(results1.size(), 1);
+    EXPECT_EQ(results1[0], i);
+  }
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+
+  delete tree;
+}
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, CoalesceInnerNode) {
+  const uint32_t key_num = FAN_OUT;
+
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  // Inserts the keys
+  for (int i = 0; i < 55; i++) {
+    EXPECT_TRUE(tree->Insert(i, i));
+  }
+
+  // The root node should have split
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+
+  EXPECT_TRUE(tree->Delete(0, 0));
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  // Ensure all values are present
+  for (int i = 1; i < 50; i++) {
+    std::vector<int64_t> results;
+    tree->GetValue(i, &results);
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results[0], i);
+  }
+
+  std::vector<int64_t> results;
+  tree->GetValue(0, &results);
+
+  EXPECT_EQ(results.size(), 0);
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+
+  // Borrow from left
+  EXPECT_TRUE(tree->Insert(0, 0));
+
+  EXPECT_TRUE(tree->Delete(FAN_OUT, FAN_OUT));
+
+  for (int i = 0; i < key_num; i++) {
+    std::vector<int64_t> results1;
+    tree->GetValue(i, &results1);
+    EXPECT_EQ(results1.size(), 1);
+    EXPECT_EQ(results1[0], i);
+  }
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+
+  delete tree;
+}
 }  // namespace terrier::storage::index
