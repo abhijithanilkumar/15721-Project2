@@ -14,6 +14,7 @@ namespace terrier::storage::index {
 #define FAN_OUT 10
 // Ceil (FAN_OUT / 2) - 1
 #define MIN_KEYS_INNER_NODE 4
+#define MIN_PTR_INNER_NODE 5
 // Ceil ((FAN_OUT - 1) / 2)
 #define MIN_KEYS_LEAF_NODE 5
 
@@ -75,13 +76,16 @@ class BPlusTree {
   class Node {
    public:
     Node() = default;
-    ~Node() = default;
+    virtual ~Node() = default;
 
     virtual Node *Split() = 0;
     virtual void SetPrevPtr(Node *ptr) = 0;
     virtual bool IsLeaf() = 0;
+    virtual uint64_t GetSize() = 0;
     virtual size_t GetHeapSpaceSubtree() = 0;
     virtual Node *GetPrevPtr() = 0;
+    virtual KeyType GetFirstKey() = 0;
+    virtual void Append(Node* node) = 0;
   };
 
   // Root of the tree
@@ -147,6 +151,18 @@ class BPlusTree {
       return (size >= FAN_OUT);
     }
 
+    // Check if the given node has underflown
+    bool IsUnderflow() {
+      uint64_t size = entries_.size();
+      return (size < MIN_KEYS_LEAF_NODE);
+    }
+
+    // Check if the given node will underflow after deletion
+    bool WillUnderflow() {
+      uint64_t size = entries_.size();
+      return ((size - 1) < MIN_KEYS_LEAF_NODE);
+    }
+
     // Set the previous pointer for the leaf node
     void SetPrevPtr(Node *ptr) override { prev_ptr_ = dynamic_cast<LeafNode *>(ptr); }
 
@@ -187,8 +203,21 @@ class BPlusTree {
       }
     }
 
+    void Insert(const KeyType &key, const ValueSet &value_set) {
+      uint64_t pos_to_insert = GetPositionToInsert(key);
+
+      if (pos_to_insert < entries_.size() && KEY_EQ_CHK(entries_[pos_to_insert].first, key)) {
+        entries_[pos_to_insert].second = value_set;
+      } else {
+        KeyValueSetPair new_pair;
+        new_pair.first = key;
+        new_pair.second = value_set;
+        entries_.insert(entries_.begin() + pos_to_insert, new_pair);
+      }
+    }
+
     // Returns the first key in the leaf node
-    KeyType GetFirstKey() { return entries_[0].first; }
+    KeyType GetFirstKey() override { return entries_[0].first; }
 
     // Split the node into two, return the new node and set sibling pointers
     Node *Split() override {
@@ -231,6 +260,9 @@ class BPlusTree {
     // Returns true, since this is a leaf node
     bool IsLeaf() override { return true; }
 
+    // Returns size (number of keys) in the node
+    uint64_t GetSize() override { return entries_.size(); }
+
     // Populate the values in a key to a vector
     void ScanAndPopulateResults(const KeyType &key, typename std::vector<ValueType> *results) {
       auto it = GetPositionOfKey(key);
@@ -250,6 +282,49 @@ class BPlusTree {
         size += (it->second).size() * sizeof(ValueType) + sizeof(KeyType);
       }
       return size;
+    }
+
+    // Return the begin() iterator for entries_ in the node
+    typename std::vector<KeyValueSetPair>::iterator GetEntriesBegin() {
+      return entries_.begin();
+    }
+
+    // Return the end() iterator for entries_ in the node
+    typename std::vector<KeyValueSetPair>::iterator GetEntriesEnd() {
+      return entries_.end();
+    }
+
+    // Append the entries in the node passed to the current node
+    void Append (Node *node) override {
+      TERRIER_ASSERT(node->IsLeaf(), "Node passed has to be a leaf.");
+      auto node_ptr = dynamic_cast<LeafNode*>(node);
+      entries_.insert(entries_.end(), node_ptr->GetEntriesBegin(), node_ptr->GetEntriesEnd());
+    }
+
+    // Remove the last (key, val) pair from the node and return it
+    KeyValueSetPair  RemoveLastKeyValPair() {
+      auto last_key_val_pair = entries_.rbegin();
+      entries_.erase(entries_.end() - 1);
+      return  *last_key_val_pair;
+    }
+
+    // Remove the first (key, val) pair from the node and return it
+    KeyValueSetPair  RemoveFirstKeyValPair() {
+      auto first_key_val_pair = entries_.begin();
+      entries_.erase(entries_.begin());
+      return *first_key_val_pair;
+    }
+
+    // Delete the corresponding (key, value) entry from the node
+    void DeleteEntry(const KeyType &key, const ValueType &value) {
+      auto key_iter = GetPositionOfKey(key);
+      auto value_iter = (key_iter->second).find(value);
+      (key_iter->second).erase(value_iter);
+
+      if ((key_iter->second).empty()) {
+        entries_.erase(key_iter);
+      }
+      return;
     }
   };
 
@@ -273,7 +348,7 @@ class BPlusTree {
     // Returns the prev_ptr
     Node *GetPrevPtr() override { return prev_ptr_; }
 
-    // Returns the position preater than equal to the given key
+    // Returns the first index whose key greater than or equal to the given key
     // TODO(abhijithanilkumar): Optimize and use binary search
     uint64_t GetPositionGreaterThanEqualTo(const KeyType &key) {
       int i;
@@ -287,10 +362,89 @@ class BPlusTree {
       return i;
     }
 
+    // Returns the last index whose key less than or equal to the given key
+    // TODO(abhijithanilkumar): Optimize and use binary search
+    uint64_t GetPositionLessThanEqualTo(const KeyType &key) {
+      int i;
+
+      for (i = 0; i < entries_.size(); i++) {
+        if (!KEY_CMP_OBJ(entries_[i].first, key) &&
+            !KEY_EQ_CHK(entries_[i].first, key)) {
+          break;
+        }
+      }
+
+      return (i - 1);
+    }
+
+    // Returns size (number of keys) in the node
+    uint64_t GetSize() override { return entries_.size(); }
+
     // Check if the node has overflown
+    // Assumption: prev_ptr_ is occupied, hence the check is >= FAN_OUT
     bool IsOverflow() {
       uint64_t size = entries_.size();
       return (size >= FAN_OUT);
+    }
+
+    // Check if the given node has underflow
+    bool IsUnderflow() {
+      // Function maybe called after deleting prev_ptr_
+      uint64_t size = entries_.size() + (prev_ptr_ != nullptr);
+      return (size < MIN_PTR_INNER_NODE);
+    }
+
+    // Check if the given node will underflow after deletion
+    // Assumption: Used for borrowing, only looks at no. of keys
+    bool WillUnderflow() {
+      // Adding 1 assuming that prev_ptr_ is always occupied
+      uint64_t size = entries_.size() + 1;
+      return ((size - 1) < MIN_PTR_INNER_NODE);
+    }
+
+    // Returns the predecessor of the node that has the given key
+    Node* GetPredecessor(const KeyType &key) {
+      uint64_t index = GetPositionLessThanEqualTo(key);
+
+      // If your index is -1, you do not have a predecessor
+      // Also means that the given key is pointed to by prev_ptr_
+      if (index == -1) return nullptr;
+
+      uint64_t pred_index = index - 1;
+
+      // The predecessor is pointed to by prev_ptr_
+      if (pred_index == -1) return prev_ptr_;
+
+      return entries_[pred_index].second;
+    }
+
+    // Returns the successor of the node that has the given key
+    Node* GetSuccessor(const KeyType &key) {
+      uint64_t index = GetPositionLessThanEqualTo(key);
+
+      uint64_t succ_index = index + 1;
+
+      // The predecessor is pointed to by prev_ptr_
+      if (succ_index == entries_.size()) return nullptr;
+
+      return entries_[succ_index].second;
+    }
+
+    // Return the begin() iterator for entries_ in the node
+    typename std::vector<KeyNodePtrPair>::iterator GetEntriesBegin() {
+      return entries_.begin();
+    }
+
+    // Return the end() iterator for entries_ in the node
+    typename std::vector<KeyNodePtrPair>::iterator GetEntriesEnd() {
+      return entries_.end();
+    }
+
+    // Append the entries in the node passed to the current node
+    void Append (Node *node) override {
+      TERRIER_ASSERT(!node->IsLeaf(), "Node passed has to be an inner node.");
+      auto node_ptr = dynamic_cast<InnerNode*>(node);
+      entries_.insert(entries_.end(), node_ptr->GetEntriesBegin(), node_ptr->GetEntriesEnd());
     }
 
     // Insert a new (key, ptr) pair into the node
@@ -378,19 +532,25 @@ class BPlusTree {
     // Returns false because this is an inner node
     bool IsLeaf() override { return false; }
 
+    // Returns the (key, ptr) pair iterator corresponding to the key
+    typename std::vector<KeyNodePtrPair>::iterator GetKeyNodePtrPair(const KeyType &key) {
+      for (auto it = entries_.begin(); it + 1 != entries_.end(); it++) {
+        if (!KEY_CMP_OBJ(key, it->first) && KEY_CMP_OBJ(key, (it + 1)->first)) {
+          return it;
+        }
+      }
+
+      return (entries_.end() - 1);
+    }
+
     // Returns the pointer corresponding to the key, used to traverse
     Node *GetNodePtrForKey(const KeyType &key) {
       if (KEY_CMP_OBJ(key, (entries_.begin())->first)) {
         return prev_ptr_;
       }
 
-      for (auto it = entries_.begin(); it + 1 != entries_.end(); it++) {
-        if (!KEY_CMP_OBJ(key, it->first) && KEY_CMP_OBJ(key, (it + 1)->first)) {
-          return it->second;
-        }
-      }
-
-      return (entries_.rbegin())->second;
+      auto key_ptr_iter = GetKeyNodePtrPair(key);
+      return key_ptr_iter->second;
     }
 
     // Calculate the space used by the subtree starting at this node
@@ -410,6 +570,39 @@ class BPlusTree {
       }
 
       return size;
+    }
+
+    // Get the first key in the node
+    KeyType GetFirstKey() override { return entries_[0].first; }
+
+    // Replace the key that points to the old_key with new_key
+    KeyType ReplaceKey(const KeyType &old_key, const KeyType &new_key) {
+      uint64_t key_pos = GetPositionLessThanEqualTo(old_key);
+      KeyType old_parent_key = entries_[key_pos].first;
+      entries_[key_pos].first = new_key;
+
+      return old_parent_key;
+    }
+
+    // Remove the last (key, ptr) pair from the node and return it
+    KeyNodePtrPair RemoveLastKeyNodePtrPair() {
+      auto last_key_ptr_pair = entries_.rbegin();
+      entries_.erase(entries_.end() - 1);
+      return *last_key_ptr_pair;
+    }
+
+    // Remove the first (key, ptr) pair from the node and return it
+    KeyNodePtrPair RemoveFirstKeyNodePtrPair() {
+      auto first_key_ptr_pair = entries_.begin();
+      entries_.erase(entries_.begin());
+      return *first_key_ptr_pair;
+    }
+
+    // Delete the corresponding (key, value) entry from the node
+    void DeleteEntry(const KeyType &key) {
+      auto key_iter = GetKeyNodePtrPair(key);
+      entries_.erase(key_iter);
+      return;
     }
   };
 
@@ -563,6 +756,130 @@ class BPlusTree {
     return height;
   }
 
+  void BorrowFromLeftLeaf(LeafNode* left_sibling, LeafNode* node, InnerNode* parent) {
+    KeyValueSetPair last_key_val_pair = left_sibling->RemoveLastKeyValPair();
+
+    // GetFirstKey() might not be present in the parent node, but we replace the corresponding key
+    parent->ReplaceKey(node->GetFirstKey(), last_key_val_pair.first);
+
+    node->Insert(last_key_val_pair.first, last_key_val_pair.second);
+  }
+
+  void BorrowFromRightLeaf(LeafNode* right_sibling, LeafNode* node, InnerNode* parent) {
+    KeyValueSetPair first_key_val_pair = right_sibling->RemoveFirstKeyValPair();
+
+    // The key might not be present in the parent node, but we replace the corresponding key
+    parent->ReplaceKey(first_key_val_pair.first, right_sibling->GetFirstKey());
+
+    node->Insert(first_key_val_pair.first, first_key_val_pair.second);
+  }
+
+  void BorrowFromLeftInner(InnerNode* left_sibling, InnerNode* node, InnerNode* parent) {
+    KeyNodePtrPair last_key_node_pair = left_sibling->RemoveLastKeyNodePtrPair();
+
+    // GetFirstKey() might not be present in the parent node, but we replace the corresponding key
+    KeyType old_parent_key = parent->ReplaceKey(node->GetFirstKey(), last_key_node_pair.first);
+
+    node->Insert(old_parent_key, node->GetPrevPtr());
+
+    node->SetPrevPtr(last_key_node_pair.second);
+  }
+
+  void BorrowFromRightInner(InnerNode* right_sibling, InnerNode* node, InnerNode* parent) {
+    // Remove first key value pair (key is transferred to parent, Node pointer becomes new prev pointer)
+    KeyNodePtrPair first_key_node_pair = node->RemoveFirstKeyNodePtrPair();
+
+    // Store prev pointer to be transferred to node
+    Node *node_prev_ptr = node->GetPrevPtr();
+
+    parent->ReplaceKey(first_key_node_pair.first, right_sibling->GetFirstKey());
+    right_sibling->SetPrevPtr(first_key_node_pair.second);
+
+    node->Insert(first_key_node_pair.first, node_prev_ptr);
+  }
+
+  // Coalesce from source to destination (right to left)
+  void Coalesce(Node *src, Node *dst, InnerNode *parent) {
+    // Both src and dst of same level
+
+    // Deletes the entry pointing to src node
+    parent->DeleteEntry(src->GetFirstKey());
+
+    // Copy entries
+    dst->Append(src);
+  }
+
+  // Balance a tree on deletion at leaf node
+  void Balance(LeafNode* node, std::stack<InnerNode *>& node_traceback) {
+    // Handle leaf merge separately
+    auto parent_node = node_traceback.top();
+    auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
+    auto right_sibling = dynamic_cast<LeafNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
+
+    // Borrow from siblings if possible
+    if (left_sibling && !left_sibling->WillUnderflow()) {
+      BorrowFromLeftLeaf(left_sibling, node, parent_node);
+      return;
+    }
+    if (right_sibling && !right_sibling->WillUnderflow()) {
+      BorrowFromRightLeaf(right_sibling, node, parent_node);
+      return;
+    }
+
+    // Try Coalesce
+    // Parent node entry for child is also deleted
+    if (left_sibling) {
+      Coalesce(node, left_sibling, parent_node);
+      delete node;
+    } else {
+      Coalesce(right_sibling, node, parent_node);
+      delete right_sibling;
+    }
+
+    node_traceback.pop();
+
+    // Handle inner nodes now
+    auto inner_node = parent_node;
+
+    while(inner_node == root_ || inner_node->IsUnderflow()) {
+      if (inner_node == root_) {
+        if (inner_node->GetSize() == 0) {
+          // Only 1 pointer left in the root
+          auto tmp = root_;
+          root_ = root_->GetPrevPtr();
+          delete tmp;
+          return;
+        }
+      }
+
+      parent_node = node_traceback.top();
+      node_traceback.pop();
+      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
+      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
+
+      if (left_inner && !left_inner->WillUnderflow()) {
+        BorrowFromLeftInner(left_inner, inner_node, parent_node);
+        return;
+      }
+      if (right_inner && !right_inner->WillUnderflow()) {
+        BorrowFromRightInner(right_inner, inner_node, parent_node);
+        return;
+      }
+
+      // Try Coalesce
+      // Parent node entry for child is also deleted
+      if (left_inner) {
+        Coalesce(inner_node, left_inner, parent_node);
+        delete inner_node;
+      } else {
+        Coalesce(right_inner, inner_node, parent_node);
+        delete right_inner;
+      }
+
+      inner_node = parent_node;
+    }
+  }
+
   // API to delete an entry in the tree
   bool Delete(const KeyType &key, const ValueType &value) {
     if (root_ == nullptr) return false;
@@ -572,7 +889,7 @@ class BPlusTree {
 
     if (!node->HasKeyValue(key, value)) {return false;}
 
-    // Delete entry and propagate
+    // Delete entry for leaf node
     node->DeleteEntry(key, value);
 
     if (node == root_){
@@ -587,20 +904,7 @@ class BPlusTree {
     // Must propagate
     if (node->IsUnderflow()) {
       // Balance at leaf level
-      LeafNode *left_sibling = node->GetLeftSibling();
-      LeafNode *right_sibling = node->GetRightSibling();
-
-      if (left_sibling && !left_sibling->WillUnderFlow()) {
-        BorrowFromLeft(left_sibling, node, node_traceback.top());
-      } else if (right_sibling && !right_sibling->WillUnderFlow()) {
-        BorrowFromRight(right_sibling, node, node_traceback.top());
-      } else if (left_sibling) {
-        CoalesceToLeft(left_sibling, node, node_traceback.top());
-      } else {
-        TERRIER_ASSERT(right_sibling, "Tree has more than 1 level. If left sibling is not mergeable then right"
-                                      "must be");
-        CoalesceToRight(right_sibling, node, node_traceback.top());
-      }
+      Balance(node, node_traceback);
     }
 
     return true;
