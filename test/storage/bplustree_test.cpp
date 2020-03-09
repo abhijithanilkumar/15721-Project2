@@ -434,9 +434,9 @@ TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
 }
 
 // NOLINTNEXTLINE
-TEST_F(BPlusTreeTests, BorrowInnerNode) {
+TEST_F(BPlusTreeTests, BorrowFromInner) {
   const uint32_t key_num = 55;
-
+  std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
   // Inserts the keys
@@ -450,25 +450,123 @@ TEST_F(BPlusTreeTests, BorrowInnerNode) {
   EXPECT_EQ(tree->GetHeightOfTree(), 3);
   EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
 
+  // Test borrow right
   EXPECT_TRUE(tree->Delete(0, 0));
 
   EXPECT_FALSE(tree->GetRoot()->IsLeaf());
 
   // Ensure all values are present
   for (int i = 1; i < 50; i++) {
-    std::vector<int64_t> results;
+    results.clear();
     tree->GetValue(i, &results);
     EXPECT_EQ(results.size(), 1);
     EXPECT_EQ(results[0], i);
   }
 
-  std::vector<int64_t> results;
+  results.clear();
   tree->GetValue(0, &results);
 
   EXPECT_EQ(results.size(), 0);
 
   EXPECT_EQ(tree->GetHeightOfTree(), 3);
 
+  // Test borrow left
+
+  // Cause overflow in leaf and create one more entry in left inner node
+  EXPECT_TRUE(tree->Insert(0, 0));
+
+  // Cause right inner node to underflow
+  EXPECT_TRUE(tree->Delete(50, 50));
+
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  // Ensure all values are present
+  for (int i = 0; i < 55; i++) {
+    if (i == 50) continue;
+    results.clear();
+    tree->GetValue(i, &results);
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results[0], i);
+  }
+
+  results.clear();
+  tree->GetValue(50, &results);
+
+  EXPECT_EQ(results.size(), 0);
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+
+  delete tree;
+}
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, CoalesceToRightInner) {
+  const uint32_t key_num = 55;
+  std::vector<int64_t> results;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  // Inserts the keys
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_TRUE(tree->Insert(i, i));
+  }
+
+  // The root node should have split
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+
+  // Test Coalesce to right
+  EXPECT_TRUE(tree->Delete(50, 50));
+  EXPECT_TRUE(tree->Delete(0, 0));
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  // Ensure all values are present
+  for (int i = 1; i < 55; i++) {
+    if (i == 50) continue;
+    results.clear();
+    tree->GetValue(i, &results);
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results[0], i);
+  }
+
+  delete tree;
+}
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
+  const uint32_t key_num = 55;
+  std::vector<int64_t> results;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
+
+  // Inserts the keys
+  for (int i = 0; i < key_num; i++) {
+    EXPECT_TRUE(tree->Insert(i, i));
+  }
+
+  // The root node should have split
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+
+  // Test Coalesce to left
+  EXPECT_TRUE(tree->Delete(0, 0));
+  EXPECT_TRUE(tree->Delete(50, 50));
+
+  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+
+  // Ensure all values are present
+  for (int i = 1; i < 55; i++) {
+    if (i == 50) continue;
+    results.clear();
+    tree->GetValue(i, &results);
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results[0], i);
+  }
 
   delete tree;
 }

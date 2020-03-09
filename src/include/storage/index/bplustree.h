@@ -607,10 +607,11 @@ class BPlusTree {
     }
 
     // Delete the corresponding (key, value) entry from the node
-    void DeleteEntry(const KeyType &key) {
+    KeyType DeleteEntry(const KeyType &key) {
       auto key_iter = GetKeyNodePtrPair(key);
+      KeyType deleted_key = key_iter->first;
       entries_.erase(key_iter);
-      return;
+      return deleted_key;
     }
   };
 
@@ -805,11 +806,23 @@ class BPlusTree {
   }
 
   // Coalesce from source to destination (right to left)
-  void Coalesce(Node *src, Node *dst, InnerNode *parent) {
+  void CoalesceLeaf(LeafNode *src, LeafNode *dst, InnerNode *parent) {
     // Both src and dst of same level
 
     // Deletes the entry pointing to src node
     parent->DeleteEntry(src->GetFirstKey());
+
+    // Copy entries
+    dst->Append(src);
+  }
+
+  // Coalesce from source to destination (right to left)
+  void CoalesceInner(InnerNode *src, InnerNode *dst, InnerNode *parent) {
+    // Both src and dst of same level
+    // Deletes the entry pointing to src node
+    KeyType parent_key = parent->DeleteEntry(src->GetFirstKey());
+
+    dst->Insert(parent_key, src->GetPrevPtr());
 
     // Copy entries
     dst->Append(src);
@@ -835,14 +848,14 @@ class BPlusTree {
     // Try Coalesce
     // Parent node entry for child is also deleted
     if (left_sibling) {
-      Coalesce(node, left_sibling, parent_node);
+      CoalesceLeaf(node, left_sibling, parent_node);
       left_sibling->SetNextPtr(node->GetNextPtr());
       if (node->GetNextPtr()) {
         node->GetNextPtr()->SetPrevPtr(left_sibling);
       }
       delete node;
     } else {
-      Coalesce(right_sibling, node, parent_node);
+      CoalesceLeaf(right_sibling, node, parent_node);
       node->SetNextPtr(right_sibling->GetNextPtr());
       if (right_sibling->GetNextPtr()) {
         right_sibling->GetNextPtr()->SetPrevPtr(node);
@@ -868,8 +881,8 @@ class BPlusTree {
 
       parent_node = node_traceback->top();
       node_traceback->pop();
-      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
-      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
+      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(inner_node->GetFirstKey()));
+      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(inner_node->GetFirstKey()));
 
       if (left_inner && !left_inner->WillUnderflow()) {
         BorrowFromLeftInner(left_inner, inner_node, parent_node);
@@ -883,10 +896,10 @@ class BPlusTree {
       // Try Coalesce
       // Parent node entry for child is also deleted
       if (left_inner) {
-        Coalesce(inner_node, left_inner, parent_node);
+        CoalesceInner(inner_node, left_inner, parent_node);
         delete inner_node;
       } else {
-        Coalesce(right_inner, inner_node, parent_node);
+        CoalesceInner(right_inner, inner_node, parent_node);
         delete right_inner;
       }
 
