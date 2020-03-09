@@ -795,15 +795,13 @@ class BPlusTree {
 
   void BorrowFromRightInner(InnerNode* right_sibling, InnerNode* node, InnerNode* parent) {
     // Remove first key value pair (key is transferred to parent, Node pointer becomes new prev pointer)
-    KeyNodePtrPair first_key_node_pair = node->RemoveFirstKeyNodePtrPair();
+    KeyNodePtrPair first_key_node_pair = right_sibling->RemoveFirstKeyNodePtrPair();
 
-    // Store prev pointer to be transferred to node
-    Node *node_prev_ptr = node->GetPrevPtr();
+    // Replace the key in the parent with the next lowest key in the right subtree
+    KeyType old_parent_key = parent->ReplaceKey(first_key_node_pair.first, first_key_node_pair.first);
 
-    parent->ReplaceKey(first_key_node_pair.first, right_sibling->GetFirstKey());
+    node->Insert(old_parent_key, right_sibling->GetPrevPtr());
     right_sibling->SetPrevPtr(first_key_node_pair.second);
-
-    node->Insert(first_key_node_pair.first, node_prev_ptr);
   }
 
   // Coalesce from source to destination (right to left)
