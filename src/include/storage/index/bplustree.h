@@ -615,6 +615,82 @@ class BPlusTree {
     }
   };
 
+  class IndexIterator {
+    LeafNode* current_;
+    size_t key_offset_;
+    size_t value_offset_;
+
+    public:
+     KeyType first;
+     ValueType second;
+
+     IndexIterator(LeafNode* c, size_t k, size_t v) {
+       current_ = c;
+       key_offset_ = 0;
+       value_offset_ = 0;
+     }
+
+     IndexIterator(const IndexIterator& itr) {
+       current_ = itr.current_;
+       key_offset_ = itr.key_offset_;
+       value_offset_ = itr.value_offset_;
+     }
+
+     void operator==(const IndexIterator& itr) {
+        return (current_ == itr.current_ &&
+                key_offset_ == itr.key_offset_ &&
+                value_offset_ == itr.value_offset_);
+     }
+
+     void operator++() {
+       if (key_offset_ < current_->GetSize() - 1) {
+         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
+           value_offset_++;
+         } else {
+           key_offset_++;
+           value_offset_ = 0;
+         }
+       } else {
+         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
+           value_offset_++;
+         } else {
+           TERRIER_ASSERT(current_ != nullptr, "The ++ operator should not be called for a null iterator");
+           current_ = current_->GetNextPtr();
+           key_offset_ = 0;
+           value_offset_ = 0;
+         }
+       }
+       auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+       first = key_val_iter->first;
+       second = key_val_iter->second.begin() + value_offset_;
+     }
+
+     void operator--() {
+       if (key_offset_ > 0) {
+         if (value_offset_ > 0) {
+           value_offset_--;
+         } else {
+           key_offset_--;
+           value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+         }
+       } else {
+         if (value_offset_ > 0) {
+           value_offset_--;
+         } else {
+             TERRIER_ASSERT(current_ != nullptr, "The -- operator should not be called for a null iterator");
+             current_ = current_->GetPrevPtr();
+             if (current_ != nullptr) {
+               key_offset_ = current_->GetSize() - 1;
+               value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+             }
+         }
+       }
+       auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+       first = key_val_iter->first;
+       second = key_val_iter->second.begin() + value_offset_;
+     }
+  };
+
   // Traverse and find the leaf node that has the given key, populate the stack to store the path
   LeafNode *FindLeafNode(const KeyType &key, std::stack<InnerNode *> *node_traceback) {
     Node *node = root_;
@@ -638,6 +714,18 @@ class BPlusTree {
     }
 
     return dynamic_cast<LeafNode *>(node);
+  }
+
+  IndexIterator begin() {
+    Node* node = root_;
+    while (!node->IsLeaf()) {
+      node = node->GetPrevPtr();
+    }
+    return IndexIterator(node, 0 , 0);
+  }
+
+  IndexIterator end() {
+    return IndexIterator(nullptr, 0, 0);
   }
 
   // Insert a new (key, value) pair in the tree and rebalance the tree
