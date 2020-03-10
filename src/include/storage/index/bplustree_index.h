@@ -60,8 +60,7 @@ class BPlusTreeIndex final : public Index {
     // Register an abort action with the txn context in case of rollback
     txn->RegisterAbortAction([=]() {
       // FIXME(15-721 project2): perform a delete from the underlying data structure of the key/value pair
-      const bool UNUSED_ATTRIBUTE result = true;
-
+      const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
       TERRIER_ASSERT(result, "Delete on the index failed.");
     });
     return result;
@@ -90,8 +89,8 @@ class BPlusTreeIndex final : public Index {
     if (result) {
       // Register an abort action with the txn context in case of rollback
       txn->RegisterAbortAction([=]() {
-        // FIXME(15-721 project2): perform a delete from the underlying data structure of the key/value pair
-        const bool UNUSED_ATTRIBUTE result = true;
+        // Perform a delete from the underlying data structure of the key/value pair
+        const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
         TERRIER_ASSERT(result, "Delete on the index failed.");
       });
     } else {
@@ -117,8 +116,7 @@ class BPlusTreeIndex final : public Index {
     txn->RegisterCommitAction([=](transaction::DeferredActionManager *deferred_action_manager) {
       deferred_action_manager->RegisterDeferredAction([=]() {
         // FIXME(15-721 project2): perform a delete from the underlying data structure of the key/value pair
-        const bool UNUSED_ATTRIBUTE result = true;
-
+        const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
         TERRIER_ASSERT(result, "Deferred delete on the index failed.");
       });
     });
@@ -165,7 +163,16 @@ class BPlusTreeIndex final : public Index {
     if (low_key_exists) index_low_key.SetFromProjectedRow(*low_key, metadata_, num_attrs);
     if (high_key_exists) index_high_key.SetFromProjectedRow(*high_key, metadata_, num_attrs);
 
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    // Perform lookup in BwTree
+    auto scan_itr = low_key_exists ? bplustree_->begin(index_low_key) : bplustree_->begin();
+
+    // Limit of 0 indicates "no limit"
+    while ((limit == 0 || value_list->size() < limit) && !(scan_itr == bplustree_->end()) &&
+           (!high_key_exists || scan_itr.first.PartialLessThan(index_high_key, &metadata_, num_attrs))) {
+      // Perform visibility check on result
+      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      ++scan_itr;
+    }
   }
 
   void ScanDescending(const transaction::TransactionContext &txn, const ProjectedRow &low_key,
@@ -177,7 +184,14 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    // Perform lookup in BwTree
+    auto scan_itr = bplustree_->end(index_high_key);
+
+    while (!(scan_itr == bplustree_->end()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first, index_low_key))) {
+      // Perform visibility check on result
+      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      --scan_itr;
+    }
   }
 
   void ScanLimitDescending(const transaction::TransactionContext &txn, const ProjectedRow &low_key,
@@ -191,7 +205,13 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    auto scan_itr = bplustree_->end(index_high_key);
+
+    while (value_list->size() < limit && !(scan_itr == bplustree_->end()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first, index_low_key))) {
+      // Perform visibility check on result
+      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      --scan_itr;
+    }
   }
 };
 
