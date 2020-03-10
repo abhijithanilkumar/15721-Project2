@@ -667,6 +667,148 @@ class BPlusTree {
     }
   }
 
+  void BorrowFromLeftLeaf(LeafNode *left_sibling, LeafNode *node, InnerNode *parent) {
+    KeyValueSetPair last_key_val_pair = left_sibling->RemoveLastKeyValPair();
+
+    // GetFirstKey() might not be present in the parent node, but we replace the corresponding key
+    parent->ReplaceKey(node->GetFirstKey(), last_key_val_pair.first);
+
+    node->Insert(last_key_val_pair.first, last_key_val_pair.second);
+  }
+
+  void BorrowFromRightLeaf(LeafNode *right_sibling, LeafNode *node, InnerNode *parent) {
+    KeyValueSetPair first_key_val_pair = right_sibling->RemoveFirstKeyValPair();
+
+    // The key might not be present in the parent node, but we replace the corresponding key
+    parent->ReplaceKey(first_key_val_pair.first, right_sibling->GetFirstKey());
+
+    node->Insert(first_key_val_pair.first, first_key_val_pair.second);
+  }
+
+  void BorrowFromLeftInner(InnerNode *left_sibling, InnerNode *node, InnerNode *parent) {
+    KeyNodePtrPair last_key_node_pair = left_sibling->RemoveLastKeyNodePtrPair();
+
+    // GetFirstKey() might not be present in the parent node, but we replace the corresponding key
+    KeyType old_parent_key = parent->ReplaceKey(node->GetFirstKey(), last_key_node_pair.first);
+
+    node->Insert(old_parent_key, node->GetPrevPtr());
+
+    node->SetPrevPtr(last_key_node_pair.second);
+  }
+
+  void BorrowFromRightInner(InnerNode *right_sibling, InnerNode *node, InnerNode *parent) {
+    // Remove first key value pair (key is transferred to parent, Node pointer becomes new prev pointer)
+    KeyNodePtrPair first_key_node_pair = right_sibling->RemoveFirstKeyNodePtrPair();
+
+    // Replace the key in the parent with the next lowest key in the right subtree
+    KeyType old_parent_key = parent->ReplaceKey(first_key_node_pair.first, first_key_node_pair.first);
+
+    node->Insert(old_parent_key, right_sibling->GetPrevPtr());
+    right_sibling->SetPrevPtr(first_key_node_pair.second);
+  }
+
+  // Coalesce from source to destination (right to left)
+  void CoalesceLeaf(LeafNode *src, LeafNode *dst, InnerNode *parent) {
+    // Both src and dst of same level
+
+    // Deletes the entry pointing to src node
+    parent->DeleteEntry(src->GetFirstKey());
+
+    // Copy entries
+    dst->Append(src);
+  }
+
+  // Coalesce from source to destination (right to left)
+  void CoalesceInner(InnerNode *src, InnerNode *dst, InnerNode *parent) {
+    // Both src and dst of same level
+    // Deletes the entry pointing to src node
+    KeyType parent_key = parent->DeleteEntry(src->GetFirstKey());
+
+    dst->Insert(parent_key, src->GetPrevPtr());
+
+    // Copy entries
+    dst->Append(src);
+  }
+
+  // Balance a tree on deletion at leaf node
+  void Balance(LeafNode *node, std::stack<InnerNode *> *node_traceback) {
+    // Handle leaf merge separately
+    auto parent_node = node_traceback->top();
+    auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
+    auto right_sibling = dynamic_cast<LeafNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
+
+    // Borrow from siblings if possible
+    if (left_sibling && !left_sibling->WillUnderflow()) {
+      BorrowFromLeftLeaf(left_sibling, node, parent_node);
+      return;
+    }
+    if (right_sibling && !right_sibling->WillUnderflow()) {
+      BorrowFromRightLeaf(right_sibling, node, parent_node);
+      return;
+    }
+
+    // Try Coalesce
+    // Parent node entry for child is also deleted
+    if (left_sibling) {
+      CoalesceLeaf(node, left_sibling, parent_node);
+      left_sibling->SetNextPtr(node->GetNextPtr());
+      if (node->GetNextPtr()) {
+        node->GetNextPtr()->SetPrevPtr(left_sibling);
+      }
+      delete node;
+    } else {
+      CoalesceLeaf(right_sibling, node, parent_node);
+      node->SetNextPtr(right_sibling->GetNextPtr());
+      if (right_sibling->GetNextPtr()) {
+        right_sibling->GetNextPtr()->SetPrevPtr(node);
+      }
+      delete right_sibling;
+    }
+
+    node_traceback->pop();
+
+    // Handle inner nodes now
+    auto inner_node = parent_node;
+
+    while (inner_node == root_ || inner_node->IsUnderflow()) {
+      if (inner_node == root_) {
+        if (inner_node->GetSize() == 0) {
+          // Only 1 pointer left in the root
+          auto tmp = root_;
+          root_ = root_->GetPrevPtr();
+          delete tmp;
+        }
+        return;
+      }
+
+      parent_node = node_traceback->top();
+      node_traceback->pop();
+      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(inner_node->GetFirstKey()));
+      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(inner_node->GetFirstKey()));
+
+      if (left_inner && !left_inner->WillUnderflow()) {
+        BorrowFromLeftInner(left_inner, inner_node, parent_node);
+        return;
+      }
+      if (right_inner && !right_inner->WillUnderflow()) {
+        BorrowFromRightInner(right_inner, inner_node, parent_node);
+        return;
+      }
+
+      // Try Coalesce
+      // Parent node entry for child is also deleted
+      if (left_inner) {
+        CoalesceInner(inner_node, left_inner, parent_node);
+        delete inner_node;
+      } else {
+        CoalesceInner(right_inner, inner_node, parent_node);
+        delete right_inner;
+      }
+
+      inner_node = parent_node;
+    }
+  }
+
  public:
   BPlusTree() { root_ = nullptr; }
 
@@ -765,150 +907,11 @@ class BPlusTree {
     return height;
   }
 
-  void BorrowFromLeftLeaf(LeafNode* left_sibling, LeafNode* node, InnerNode* parent) {
-    KeyValueSetPair last_key_val_pair = left_sibling->RemoveLastKeyValPair();
-
-    // GetFirstKey() might not be present in the parent node, but we replace the corresponding key
-    parent->ReplaceKey(node->GetFirstKey(), last_key_val_pair.first);
-
-    node->Insert(last_key_val_pair.first, last_key_val_pair.second);
-  }
-
-  void BorrowFromRightLeaf(LeafNode* right_sibling, LeafNode* node, InnerNode* parent) {
-    KeyValueSetPair first_key_val_pair = right_sibling->RemoveFirstKeyValPair();
-
-    // The key might not be present in the parent node, but we replace the corresponding key
-    parent->ReplaceKey(first_key_val_pair.first, right_sibling->GetFirstKey());
-
-    node->Insert(first_key_val_pair.first, first_key_val_pair.second);
-  }
-
-  void BorrowFromLeftInner(InnerNode* left_sibling, InnerNode* node, InnerNode* parent) {
-    KeyNodePtrPair last_key_node_pair = left_sibling->RemoveLastKeyNodePtrPair();
-
-    // GetFirstKey() might not be present in the parent node, but we replace the corresponding key
-    KeyType old_parent_key = parent->ReplaceKey(node->GetFirstKey(), last_key_node_pair.first);
-
-    node->Insert(old_parent_key, node->GetPrevPtr());
-
-    node->SetPrevPtr(last_key_node_pair.second);
-  }
-
-  void BorrowFromRightInner(InnerNode* right_sibling, InnerNode* node, InnerNode* parent) {
-    // Remove first key value pair (key is transferred to parent, Node pointer becomes new prev pointer)
-    KeyNodePtrPair first_key_node_pair = right_sibling->RemoveFirstKeyNodePtrPair();
-
-    // Replace the key in the parent with the next lowest key in the right subtree
-    KeyType old_parent_key = parent->ReplaceKey(first_key_node_pair.first, first_key_node_pair.first);
-
-    node->Insert(old_parent_key, right_sibling->GetPrevPtr());
-    right_sibling->SetPrevPtr(first_key_node_pair.second);
-  }
-
-  // Coalesce from source to destination (right to left)
-  void CoalesceLeaf(LeafNode *src, LeafNode *dst, InnerNode *parent) {
-    // Both src and dst of same level
-
-    // Deletes the entry pointing to src node
-    parent->DeleteEntry(src->GetFirstKey());
-
-    // Copy entries
-    dst->Append(src);
-  }
-
-  // Coalesce from source to destination (right to left)
-  void CoalesceInner(InnerNode *src, InnerNode *dst, InnerNode *parent) {
-    // Both src and dst of same level
-    // Deletes the entry pointing to src node
-    KeyType parent_key = parent->DeleteEntry(src->GetFirstKey());
-
-    dst->Insert(parent_key, src->GetPrevPtr());
-
-    // Copy entries
-    dst->Append(src);
-  }
-
-  // Balance a tree on deletion at leaf node
-  void Balance(LeafNode* node, std::stack<InnerNode *> *node_traceback) {
-    // Handle leaf merge separately
-    auto parent_node = node_traceback->top();
-    auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
-    auto right_sibling = dynamic_cast<LeafNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
-
-    // Borrow from siblings if possible
-    if (left_sibling && !left_sibling->WillUnderflow()) {
-      BorrowFromLeftLeaf(left_sibling, node, parent_node);
-      return;
-    }
-    if (right_sibling && !right_sibling->WillUnderflow()) {
-      BorrowFromRightLeaf(right_sibling, node, parent_node);
-      return;
-    }
-
-    // Try Coalesce
-    // Parent node entry for child is also deleted
-    if (left_sibling) {
-      CoalesceLeaf(node, left_sibling, parent_node);
-      left_sibling->SetNextPtr(node->GetNextPtr());
-      if (node->GetNextPtr()) {
-        node->GetNextPtr()->SetPrevPtr(left_sibling);
-      }
-      delete node;
-    } else {
-      CoalesceLeaf(right_sibling, node, parent_node);
-      node->SetNextPtr(right_sibling->GetNextPtr());
-      if (right_sibling->GetNextPtr()) {
-        right_sibling->GetNextPtr()->SetPrevPtr(node);
-      }
-      delete right_sibling;
-    }
-
-    node_traceback->pop();
-
-    // Handle inner nodes now
-    auto inner_node = parent_node;
-
-    while(inner_node == root_ || inner_node->IsUnderflow()) {
-      if (inner_node == root_) {
-        if (inner_node->GetSize() == 0) {
-          // Only 1 pointer left in the root
-          auto tmp = root_;
-          root_ = root_->GetPrevPtr();
-          delete tmp;
-        }
-        return;
-      }
-
-      parent_node = node_traceback->top();
-      node_traceback->pop();
-      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(inner_node->GetFirstKey()));
-      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(inner_node->GetFirstKey()));
-
-      if (left_inner && !left_inner->WillUnderflow()) {
-        BorrowFromLeftInner(left_inner, inner_node, parent_node);
-        return;
-      }
-      if (right_inner && !right_inner->WillUnderflow()) {
-        BorrowFromRightInner(right_inner, inner_node, parent_node);
-        return;
-      }
-
-      // Try Coalesce
-      // Parent node entry for child is also deleted
-      if (left_inner) {
-        CoalesceInner(inner_node, left_inner, parent_node);
-        delete inner_node;
-      } else {
-        CoalesceInner(right_inner, inner_node, parent_node);
-        delete right_inner;
-      }
-
-      inner_node = parent_node;
-    }
-  }
-
   // API to delete an entry in the tree
   bool Delete(const KeyType &key, const ValueType &value) {
+    // Avoid races
+    common::SpinLatch::ScopedSpinLatch guard(&tree_latch_);
+
     if (root_ == nullptr) return false;
 
     std::stack<InnerNode *> node_traceback;
