@@ -108,6 +108,14 @@ class BPlusTree {
     LeafNode *prev_ptr_;
     LeafNode *next_ptr_;
 
+   public:
+    LeafNode() {
+      prev_ptr_ = nullptr;
+      next_ptr_ = nullptr;
+    }
+
+    ~LeafNode() = default;
+
     // Find the sorted position for a new key
     // TODO(abhijithanilkumar): Optimize and use binary search
     uint64_t GetPositionToInsert(const KeyType &key) {
@@ -122,6 +130,20 @@ class BPlusTree {
       return i;
     }
 
+    // Returns the last index whose key less than or equal to the given key
+    // TODO(abhijithanilkumar): Optimize and use binary search
+    uint64_t GetPositionLessThanEqualTo(const KeyType &key) {
+      int i;
+
+      for (i = 0; i < entries_.size(); i++) {
+        if (KEY_CMP_OBJ(key, entries_[i].first)) {
+          break;
+        }
+      }
+
+      return (i - 1);
+    }
+
     // Return an iterator to the position of the key
     typename std::vector<KeyValueSetPair>::iterator GetPositionOfKey(const KeyType &key) {
       auto it = entries_.begin();
@@ -134,13 +156,6 @@ class BPlusTree {
       return it;
     }
 
-   public:
-    LeafNode() {
-      prev_ptr_ = nullptr;
-      next_ptr_ = nullptr;
-    }
-
-    ~LeafNode() = default;
 
     // Returns the prev_ptr for the node
     Node *GetPrevPtr() override { return prev_ptr_; }
@@ -376,8 +391,7 @@ class BPlusTree {
       int i;
 
       for (i = 0; i < entries_.size(); i++) {
-        if (!KEY_CMP_OBJ(entries_[i].first, key) &&
-            !KEY_EQ_CHK(entries_[i].first, key)) {
+        if (KEY_CMP_OBJ(key, entries_[0].first)) {
           break;
         }
       }
@@ -617,8 +631,8 @@ class BPlusTree {
 
   class IndexIterator {
     LeafNode* current_;
-    size_t key_offset_;
-    size_t value_offset_;
+    int key_offset_;
+    int value_offset_;
 
     public:
      KeyType first;
@@ -626,17 +640,24 @@ class BPlusTree {
 
      IndexIterator(LeafNode* c, size_t k, size_t v) {
        current_ = c;
-       key_offset_ = 0;
-       value_offset_ = 0;
+       key_offset_ = k;
+       value_offset_ = v;
+       if (current_ != nullptr) {
+         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+         first = key_val_iter->first;
+         second = *(std::next(key_val_iter->second.begin(), value_offset_));
+       }
      }
 
      IndexIterator(const IndexIterator& itr) {
        current_ = itr.current_;
        key_offset_ = itr.key_offset_;
        value_offset_ = itr.value_offset_;
+       first = itr.first;
+       second = itr.second;
      }
 
-     void operator==(const IndexIterator& itr) {
+     bool operator==(const IndexIterator& itr) {
         return (current_ == itr.current_ &&
                 key_offset_ == itr.key_offset_ &&
                 value_offset_ == itr.value_offset_);
@@ -660,9 +681,11 @@ class BPlusTree {
            value_offset_ = 0;
          }
        }
-       auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
-       first = key_val_iter->first;
-       second = key_val_iter->second.begin() + value_offset_;
+       if (current_ != nullptr) {
+         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+         first = key_val_iter->first;
+         second = *(std::next(key_val_iter->second.begin(), value_offset_));
+       }
      }
 
      void operator--() {
@@ -678,16 +701,21 @@ class BPlusTree {
            value_offset_--;
          } else {
              TERRIER_ASSERT(current_ != nullptr, "The -- operator should not be called for a null iterator");
-             current_ = current_->GetPrevPtr();
+             current_ = dynamic_cast<LeafNode *>(current_->GetPrevPtr());
              if (current_ != nullptr) {
                key_offset_ = current_->GetSize() - 1;
                value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+             } else {
+               key_offset_ = 0;
+               value_offset_ = 0;
              }
          }
        }
-       auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
-       first = key_val_iter->first;
-       second = key_val_iter->second.begin() + value_offset_;
+       if (current_ != nullptr) {
+         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+         first = key_val_iter->first;
+         second = *(std::next(key_val_iter->second.begin(), value_offset_));
+       }
      }
   };
 
@@ -714,18 +742,6 @@ class BPlusTree {
     }
 
     return dynamic_cast<LeafNode *>(node);
-  }
-
-  IndexIterator begin() {
-    Node* node = root_;
-    while (!node->IsLeaf()) {
-      node = node->GetPrevPtr();
-    }
-    return IndexIterator(node, 0 , 0);
-  }
-
-  IndexIterator end() {
-    return IndexIterator(nullptr, 0, 0);
   }
 
   // Insert a new (key, value) pair in the tree and rebalance the tree
@@ -1026,6 +1042,44 @@ class BPlusTree {
     }
 
     return true;
+  }
+
+  IndexIterator begin() {
+    Node *node = root_;
+    while (!node->IsLeaf()) {
+      node = node->GetPrevPtr();
+    }
+    return IndexIterator(dynamic_cast<LeafNode *>(node), 0, 0);
+  }
+
+  IndexIterator begin(const KeyType &key) {
+    auto node = FindLeafNode(key);
+    auto pos = node->GetPositionToInsert(key);
+    return IndexIterator(node, pos, 0);
+  }
+
+  IndexIterator end() { return IndexIterator(nullptr, 0, 0); }
+
+  IndexIterator end(const KeyType &key) {
+    auto node = FindLeafNode(key);
+    auto pos = node->GetPositionLessThanEqualTo(key);
+    if (pos == -1) {
+      node = dynamic_cast<LeafNode *>(node->GetPrevPtr());
+      if (node == nullptr) {
+        return IndexIterator(node, 0, 0);
+      }
+      pos = node->GetSize() - 1;
+    }
+    int val_off = (node->GetEntriesEnd() - 1)->second.size() - 1;
+    return IndexIterator(node, pos, val_off);
+  }
+
+  bool KeyCmpGreater(const KeyType &key1, const KeyType &key2) {
+    return KEY_CMP_OBJ(key2, key1);
+  }
+
+  bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) {
+    return !KEY_CMP_OBJ(key1, key2);
   }
 };
 }  // namespace terrier::storage::index
