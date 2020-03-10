@@ -114,7 +114,11 @@ class BPlusTree {
       next_ptr_ = nullptr;
     }
 
-    ~LeafNode() = default;
+    ~LeafNode() {
+      entries_.clear();
+      prev_ptr_ = nullptr;
+      next_ptr_ = nullptr;
+    }
 
     // Find the sorted position for a new key
     // TODO(abhijithanilkumar): Optimize and use binary search
@@ -366,7 +370,10 @@ class BPlusTree {
    public:
     InnerNode() { prev_ptr_ = nullptr; }
 
-    ~InnerNode() = default;
+    ~InnerNode() {
+      entries_.clear();
+      prev_ptr_ = nullptr;
+    }
 
     // Returns the prev_ptr
     Node *GetPrevPtr() override { return prev_ptr_; }
@@ -391,7 +398,7 @@ class BPlusTree {
       int i;
 
       for (i = 0; i < entries_.size(); i++) {
-        if (KEY_CMP_OBJ(key, entries_[0].first)) {
+        if (KEY_CMP_OBJ(key, entries_[i].first)) {
           break;
         }
       }
@@ -856,14 +863,14 @@ class BPlusTree {
     if (left_sibling) {
       CoalesceLeaf(node, left_sibling, parent_node);
       left_sibling->SetNextPtr(node->GetNextPtr());
-      if (node->GetNextPtr()) {
+      if (node->GetNextPtr() != nullptr) {
         node->GetNextPtr()->SetPrevPtr(left_sibling);
       }
       delete node;
     } else {
       CoalesceLeaf(right_sibling, node, parent_node);
       node->SetNextPtr(right_sibling->GetNextPtr());
-      if (right_sibling->GetNextPtr()) {
+      if (right_sibling->GetNextPtr() != nullptr) {
         right_sibling->GetNextPtr()->SetPrevPtr(node);
       }
       delete right_sibling;
