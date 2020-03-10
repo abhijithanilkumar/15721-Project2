@@ -40,8 +40,8 @@ class BPlusTreeIndex final : public Index {
   }
 
   size_t GetHeapUsage() const final {
-    // FIXME(15-721 project2): access the underlying data structure and report the heap usage
-    return 0;
+    // Access the B+ Tree and report the heap usage
+    return bplustree_->GetHeapUsage();
   }
 
   bool Insert(const common::ManagedPointer<transaction::TransactionContext> txn, const ProjectedRow &tuple,
@@ -50,9 +50,9 @@ class BPlusTreeIndex final : public Index {
                    "This Insert is designed for secondary indexes with no uniqueness constraints.");
     KeyType index_key;
     index_key.SetFromProjectedRow(tuple, metadata_, metadata_.GetSchema().GetColumns().size());
-    // FIXME(15-721 project2): perform a non-unique unconditional insert into the underlying data structure of the
-    // key/value pair
-    const bool UNUSED_ATTRIBUTE result = true;
+    // Perform a non-unique unconditional insert into the B+ Tree
+
+    const bool result = bplustree_->Insert(index_key, location, false);
 
     TERRIER_ASSERT(
         result,
@@ -60,8 +60,7 @@ class BPlusTreeIndex final : public Index {
     // Register an abort action with the txn context in case of rollback
     txn->RegisterAbortAction([=]() {
       // FIXME(15-721 project2): perform a delete from the underlying data structure of the key/value pair
-      const bool UNUSED_ATTRIBUTE result = true;
-
+      const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
       TERRIER_ASSERT(result, "Delete on the index failed.");
     });
     return result;
@@ -72,27 +71,26 @@ class BPlusTreeIndex final : public Index {
     TERRIER_ASSERT(metadata_.GetSchema().Unique(), "This Insert is designed for indexes with uniqueness constraints.");
     KeyType index_key;
     index_key.SetFromProjectedRow(tuple, metadata_, metadata_.GetSchema().GetColumns().size());
-    bool predicate_satisfied UNUSED_ATTRIBUTE = false;
+    bool predicate_satisfied = false;
 
     // The predicate checks if any matching keys have write-write conflicts or are still visible to the calling txn.
-    auto predicate UNUSED_ATTRIBUTE = [txn](const TupleSlot slot) -> bool {
+    auto predicate = [txn](const TupleSlot slot) -> bool {
       const auto *const data_table = slot.GetBlock()->data_table_;
       const auto has_conflict = data_table->HasConflict(*txn, slot);
       const auto is_visible = data_table->IsVisible(*txn, slot);
       return has_conflict || is_visible;
     };
 
-    // FIXME(15-721 project2): perform a non-unique CONDITIONAL insert into the underlying data structure of the
-    // key/value pair
-    const bool UNUSED_ATTRIBUTE result = true;
+    // Perform a non-unique CONDITIONAL insert into the B+ Tree
+    const bool result = bplustree_->ConditionalInsert(index_key, location, predicate, &predicate_satisfied);
 
     TERRIER_ASSERT(predicate_satisfied != result, "If predicate is not satisfied then insertion should succeed.");
 
     if (result) {
       // Register an abort action with the txn context in case of rollback
       txn->RegisterAbortAction([=]() {
-        // FIXME(15-721 project2): perform a delete from the underlying data structure of the key/value pair
-        const bool UNUSED_ATTRIBUTE result = true;
+        // Perform a delete from the underlying data structure of the key/value pair
+        const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
         TERRIER_ASSERT(result, "Delete on the index failed.");
       });
     } else {
@@ -118,8 +116,7 @@ class BPlusTreeIndex final : public Index {
     txn->RegisterCommitAction([=](transaction::DeferredActionManager *deferred_action_manager) {
       deferred_action_manager->RegisterDeferredAction([=]() {
         // FIXME(15-721 project2): perform a delete from the underlying data structure of the key/value pair
-        const bool UNUSED_ATTRIBUTE result = true;
-
+        const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
         TERRIER_ASSERT(result, "Deferred delete on the index failed.");
       });
     });
@@ -136,7 +133,7 @@ class BPlusTreeIndex final : public Index {
     index_key.SetFromProjectedRow(key, metadata_, metadata_.GetSchema().GetColumns().size());
 
     // Perform lookup in BPlusTree
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    bplustree_->GetValue(index_key, &results);
 
     // Avoid resizing our value_list, even if it means over-provisioning
     value_list->reserve(results.size());
@@ -166,7 +163,16 @@ class BPlusTreeIndex final : public Index {
     if (low_key_exists) index_low_key.SetFromProjectedRow(*low_key, metadata_, num_attrs);
     if (high_key_exists) index_high_key.SetFromProjectedRow(*high_key, metadata_, num_attrs);
 
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    // Perform lookup in BwTree
+    auto scan_itr = low_key_exists ? bplustree_->begin(index_low_key) : bplustree_->begin();
+
+    // Limit of 0 indicates "no limit"
+    while ((limit == 0 || value_list->size() < limit) && !(scan_itr == bplustree_->end()) &&
+           (!high_key_exists || scan_itr.first.PartialLessThan(index_high_key, &metadata_, num_attrs))) {
+      // Perform visibility check on result
+      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      ++scan_itr;
+    }
   }
 
   void ScanDescending(const transaction::TransactionContext &txn, const ProjectedRow &low_key,
@@ -178,7 +184,14 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    // Perform lookup in BwTree
+    auto scan_itr = bplustree_->end(index_high_key);
+
+    while (!(scan_itr == bplustree_->end()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first, index_low_key))) {
+      // Perform visibility check on result
+      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      --scan_itr;
+    }
   }
 
   void ScanLimitDescending(const transaction::TransactionContext &txn, const ProjectedRow &low_key,
@@ -192,7 +205,13 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    // FIXME(15-721 project2): perform a lookup of the underlying data structure of the key
+    auto scan_itr = bplustree_->end(index_high_key);
+
+    while (value_list->size() < limit && !(scan_itr == bplustree_->end()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first, index_low_key))) {
+      // Perform visibility check on result
+      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      --scan_itr;
+    }
   }
 };
 
