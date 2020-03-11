@@ -125,7 +125,7 @@ class BPlusTree {
     int GetPositionToInsert(const KeyType &key) {
       int i;
 
-      for (i = 0; i < entries_.size(); i++) {
+      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
         if (!KEY_CMP_OBJ(entries_[i].first, key)) {
           break;
         }
@@ -139,7 +139,7 @@ class BPlusTree {
     int GetPositionLessThanEqualTo(const KeyType &key) {
       int i;
 
-      for (i = 0; i < entries_.size(); i++) {
+      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
         if (KEY_CMP_OBJ(key, entries_[i].first)) {
           break;
         }
@@ -373,7 +373,7 @@ class BPlusTree {
     int GetPositionGreaterThanEqualTo(const KeyType &key) {
       int i;
 
-      for (i = 0; i < entries_.size(); i++) {
+      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
         if (!KEY_CMP_OBJ(entries_[i].first, key)) {
           break;
         }
@@ -387,7 +387,7 @@ class BPlusTree {
     int GetPositionLessThanEqualTo(const KeyType &key) {
       int i;
 
-      for (i = 0; i < entries_.size(); i++) {
+      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
         if (KEY_CMP_OBJ(key, entries_[i].first)) {
           break;
         }
@@ -441,7 +441,7 @@ class BPlusTree {
     Node *GetSuccessor(const KeyType &key) {
       int index = GetPositionLessThanEqualTo(key);
 
-      int succ_index = index + 1;
+      uint64_t succ_index = index + 1;
 
       // The predecessor is pointed to by prev_ptr_
       if (succ_index == entries_.size()) return nullptr;
