@@ -164,13 +164,13 @@ class BPlusTreeIndex final : public Index {
     if (high_key_exists) index_high_key.SetFromProjectedRow(*high_key, metadata_, num_attrs);
 
     // Perform lookup in BwTree
-    auto scan_itr = low_key_exists ? bplustree_->begin(index_low_key) : bplustree_->begin();
+    auto scan_itr = low_key_exists ? bplustree_->Begin(index_low_key) : bplustree_->Begin();
 
     // Limit of 0 indicates "no limit"
-    while ((limit == 0 || value_list->size() < limit) && !(scan_itr == bplustree_->end()) &&
-           (!high_key_exists || scan_itr.first.PartialLessThan(index_high_key, &metadata_, num_attrs))) {
+    while ((limit == 0 || value_list->size() < limit) && !(scan_itr == bplustree_->End()) &&
+           (!high_key_exists || scan_itr.first_.PartialLessThan(index_high_key, &metadata_, num_attrs))) {
       // Perform visibility check on result
-      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
       ++scan_itr;
     }
   }
@@ -185,11 +185,11 @@ class BPlusTreeIndex final : public Index {
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
     // Perform lookup in BwTree
-    auto scan_itr = bplustree_->end(index_high_key);
+    auto scan_itr = bplustree_->End(index_high_key);
 
-    while (!(scan_itr == bplustree_->end()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first, index_low_key))) {
+    while (!(scan_itr == bplustree_->End()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
       // Perform visibility check on result
-      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
       --scan_itr;
     }
   }
@@ -205,11 +205,12 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    auto scan_itr = bplustree_->end(index_high_key);
+    auto scan_itr = bplustree_->End(index_high_key);
 
-    while (value_list->size() < limit && !(scan_itr == bplustree_->end()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first, index_low_key))) {
+    while (value_list->size() < limit && !(scan_itr == bplustree_->End()) &&
+           (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
       // Perform visibility check on result
-      if (IsVisible(txn, scan_itr.second)) value_list->emplace_back(scan_itr.second);
+      if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
       --scan_itr;
     }
   }
