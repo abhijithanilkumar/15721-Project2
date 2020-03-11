@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 #include <mutex>
-#include <shared_mutex>
+#include <tbb/spin_rw_mutex.h>
 #include "common/macros.h"
 #include "common/spin_latch.h"
 
@@ -67,7 +67,7 @@ class BPlusTree {
   constexpr static const KeyEqualityChecker KEY_EQ_CHK{};
   constexpr static const ValueEqualityChecker VAL_EQ_CHK{};
   // Global latch for the entire tree
-  mutable std::shared_mutex tree_lock_;
+  tbb::spin_rw_mutex tree_lock_;
 
   /*
    * class Node - The base class for node types, i.e. InnerNode and LeafNode
@@ -915,7 +915,7 @@ class BPlusTree {
   // API to insert a new (key, value) pair into the tree
   bool Insert(const KeyType &key, const ValueType &value, bool unique_key = false) {
     // Avoid races
-    std::unique_lock lock(tree_lock_);
+    tbb::spin_rw_mutex::scoped_lock lock(tree_lock_);
     std::stack<InnerNode *> node_traceback;
     LeafNode *insert_node;
 
@@ -941,7 +941,7 @@ class BPlusTree {
   bool ConditionalInsert(const KeyType &key, const ValueType &value, std::function<bool(const ValueType)> predicate,
                          bool *predicate_satisfied) {
     // Avoid races
-    std::unique_lock lock(tree_lock_);
+    tbb::spin_rw_mutex::scoped_lock lock(tree_lock_);
     LeafNode *insert_node;
     std::stack<InnerNode *> node_traceback;
 
@@ -968,7 +968,7 @@ class BPlusTree {
   // API to fetch the values stored in the corresponding key and populate a vector with it
   void GetValue(const KeyType &key, typename std::vector<ValueType> *results) {
     // Avoid races
-    std::shared_lock lock(tree_lock_);
+    tbb::spin_rw_mutex::scoped_lock lock(tree_lock_, false);
 
     LeafNode *node = FindLeafNode(key);
 
@@ -1007,7 +1007,7 @@ class BPlusTree {
   // API to delete an entry in the tree
   bool Delete(const KeyType &key, const ValueType &value) {
     // Avoid races
-    std::unique_lock lock(tree_lock_);
+    tbb::spin_rw_mutex::scoped_lock lock(tree_lock_);
 
     if (root_ == nullptr) return false;
 
