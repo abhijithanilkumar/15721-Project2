@@ -5,7 +5,7 @@
 
 namespace terrier::storage::index {
 struct BPlusTreeTests : public TerrierTest {
-  const uint32_t num_threads_ =
+  const int num_threads_ =
       MultiThreadTestUtil::HardwareConcurrency() + (MultiThreadTestUtil::HardwareConcurrency() % 2);
 };
 
@@ -32,7 +32,7 @@ TEST_F(BPlusTreeTests, SimpleScanKeyTest) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, MultipleKeyInsert) {
-  const uint32_t key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -74,7 +74,7 @@ TEST_F(BPlusTreeTests, MultipleKeyInsert) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, DuplicateInsert) {
-  const uint32_t key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -116,7 +116,7 @@ TEST_F(BPlusTreeTests, DuplicateInsert) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, RootSplitTest) {
-  const uint32_t key_num = FAN_OUT;
+  const int key_num = FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -156,7 +156,7 @@ TEST_F(BPlusTreeTests, RootSplitTest) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, UniqueKeyValueInsert) {
-  const uint32_t key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -199,7 +199,7 @@ TEST_F(BPlusTreeTests, UniqueKeyValueInsert) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, UniqueKeyInsert) {
-  const uint32_t key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -242,7 +242,7 @@ TEST_F(BPlusTreeTests, UniqueKeyInsert) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, InnerNodeSplit) {
-  const uint32_t key_num = FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -267,7 +267,7 @@ TEST_F(BPlusTreeTests, InnerNodeSplit) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, SimpleDelete) {
-  const uint32_t key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -302,7 +302,7 @@ TEST_F(BPlusTreeTests, SimpleDelete) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, MultiValueDelete) {
-  const uint32_t key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -340,7 +340,7 @@ TEST_F(BPlusTreeTests, MultiValueDelete) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, CoalesceLeavesOnDelete) {
-  const uint32_t key_num = FAN_OUT;
+  const int key_num = FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -379,7 +379,7 @@ TEST_F(BPlusTreeTests, CoalesceLeavesOnDelete) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
-  const uint32_t key_num = FAN_OUT;
+  const int key_num = FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -435,7 +435,7 @@ TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, BorrowFromInner) {
-  const uint32_t key_num = 55;
+  const int key_num = 55;
   std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -501,7 +501,7 @@ TEST_F(BPlusTreeTests, BorrowFromInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, CoalesceToRightInner) {
-  const uint32_t key_num = 55;
+  const int key_num = 55;
   std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -537,7 +537,7 @@ TEST_F(BPlusTreeTests, CoalesceToRightInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
-  const uint32_t key_num = 55;
+  const int key_num = 55;
   std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -573,7 +573,7 @@ TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, RootInnerToLeaf) {
-  const uint32_t key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
