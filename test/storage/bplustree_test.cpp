@@ -599,7 +599,7 @@ TEST_F(BPlusTreeTests, RootInnerToLeaf) {
   EXPECT_TRUE(tree->GetRoot()->IsLeaf());
   EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
 
-  tree->Delete(keys[key_num-1], keys[key_num-1]);
+  tree->Delete(keys[key_num - 1], keys[key_num - 1]);
 
   EXPECT_EQ(tree->GetRoot(), nullptr);
 }

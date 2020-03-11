@@ -85,7 +85,7 @@ class BPlusTree {
     virtual size_t GetHeapSpaceSubtree() = 0;
     virtual Node *GetPrevPtr() = 0;
     virtual KeyType GetFirstKey() = 0;
-    virtual void Append(Node* node) = 0;
+    virtual void Append(Node *node) = 0;
   };
 
   // Root of the tree
@@ -114,7 +114,7 @@ class BPlusTree {
       next_ptr_ = nullptr;
     }
 
-    ~LeafNode() {
+    ~LeafNode() override {
       entries_.clear();
       prev_ptr_ = nullptr;
       next_ptr_ = nullptr;
@@ -122,7 +122,7 @@ class BPlusTree {
 
     // Find the sorted position for a new key
     // TODO(abhijithanilkumar): Optimize and use binary search
-    uint64_t GetPositionToInsert(const KeyType &key) {
+    int GetPositionToInsert(const KeyType &key) {
       int i;
 
       for (i = 0; i < entries_.size(); i++) {
@@ -136,7 +136,7 @@ class BPlusTree {
 
     // Returns the last index whose key less than or equal to the given key
     // TODO(abhijithanilkumar): Optimize and use binary search
-    uint64_t GetPositionLessThanEqualTo(const KeyType &key) {
+    int GetPositionLessThanEqualTo(const KeyType &key) {
       int i;
 
       for (i = 0; i < entries_.size(); i++) {
@@ -159,7 +159,6 @@ class BPlusTree {
 
       return it;
     }
-
 
     // Returns the prev_ptr for the node
     Node *GetPrevPtr() override { return prev_ptr_; }
@@ -304,31 +303,27 @@ class BPlusTree {
     }
 
     // Return the begin() iterator for entries_ in the node
-    typename std::vector<KeyValueSetPair>::iterator GetEntriesBegin() {
-      return entries_.begin();
-    }
+    typename std::vector<KeyValueSetPair>::iterator GetEntriesBegin() { return entries_.begin(); }
 
     // Return the end() iterator for entries_ in the node
-    typename std::vector<KeyValueSetPair>::iterator GetEntriesEnd() {
-      return entries_.end();
-    }
+    typename std::vector<KeyValueSetPair>::iterator GetEntriesEnd() { return entries_.end(); }
 
     // Append the entries in the node passed to the current node
-    void Append (Node *node) override {
+    void Append(Node *node) override {
       TERRIER_ASSERT(node->IsLeaf(), "Node passed has to be a leaf.");
-      auto node_ptr = dynamic_cast<LeafNode*>(node);
+      auto node_ptr = dynamic_cast<LeafNode *>(node);
       entries_.insert(entries_.end(), node_ptr->GetEntriesBegin(), node_ptr->GetEntriesEnd());
     }
 
     // Remove the last (key, val) pair from the node and return it
-    KeyValueSetPair  RemoveLastKeyValPair() {
+    KeyValueSetPair RemoveLastKeyValPair() {
       auto last_key_val_pair = *entries_.rbegin();
       entries_.erase(entries_.end() - 1);
-      return  last_key_val_pair;
+      return last_key_val_pair;
     }
 
     // Remove the first (key, val) pair from the node and return it
-    KeyValueSetPair  RemoveFirstKeyValPair() {
+    KeyValueSetPair RemoveFirstKeyValPair() {
       auto first_key_val_pair = *entries_.begin();
       entries_.erase(entries_.begin());
       return first_key_val_pair;
@@ -343,16 +338,11 @@ class BPlusTree {
       if ((key_iter->second).empty()) {
         entries_.erase(key_iter);
       }
-      return;
     }
 
-    LeafNode *GetNextPtr() {
-      return next_ptr_;
-    }
+    LeafNode *GetNextPtr() { return next_ptr_; }
 
-    void SetNextPtr(LeafNode *node) {
-      next_ptr_ = node;
-    }
+    void SetNextPtr(LeafNode *node) { next_ptr_ = node; }
   };
 
   /*
@@ -370,7 +360,7 @@ class BPlusTree {
    public:
     InnerNode() { prev_ptr_ = nullptr; }
 
-    ~InnerNode() {
+    ~InnerNode() override {
       entries_.clear();
       prev_ptr_ = nullptr;
     }
@@ -380,7 +370,7 @@ class BPlusTree {
 
     // Returns the first index whose key greater than or equal to the given key
     // TODO(abhijithanilkumar): Optimize and use binary search
-    uint64_t GetPositionGreaterThanEqualTo(const KeyType &key) {
+    int GetPositionGreaterThanEqualTo(const KeyType &key) {
       int i;
 
       for (i = 0; i < entries_.size(); i++) {
@@ -394,7 +384,7 @@ class BPlusTree {
 
     // Returns the last index whose key less than or equal to the given key
     // TODO(abhijithanilkumar): Optimize and use binary search
-    uint64_t GetPositionLessThanEqualTo(const KeyType &key) {
+    int GetPositionLessThanEqualTo(const KeyType &key) {
       int i;
 
       for (i = 0; i < entries_.size(); i++) {
@@ -432,14 +422,14 @@ class BPlusTree {
     }
 
     // Returns the predecessor of the node that has the given key
-    Node* GetPredecessor(const KeyType &key) {
-      uint64_t index = GetPositionLessThanEqualTo(key);
+    Node *GetPredecessor(const KeyType &key) {
+      int index = GetPositionLessThanEqualTo(key);
 
       // If your index is -1, you do not have a predecessor
       // Also means that the given key is pointed to by prev_ptr_
       if (index == -1) return nullptr;
 
-      uint64_t pred_index = index - 1;
+      int pred_index = index - 1;
 
       // The predecessor is pointed to by prev_ptr_
       if (pred_index == -1) return prev_ptr_;
@@ -448,10 +438,10 @@ class BPlusTree {
     }
 
     // Returns the successor of the node that has the given key
-    Node* GetSuccessor(const KeyType &key) {
-      uint64_t index = GetPositionLessThanEqualTo(key);
+    Node *GetSuccessor(const KeyType &key) {
+      int index = GetPositionLessThanEqualTo(key);
 
-      uint64_t succ_index = index + 1;
+      int succ_index = index + 1;
 
       // The predecessor is pointed to by prev_ptr_
       if (succ_index == entries_.size()) return nullptr;
@@ -460,19 +450,15 @@ class BPlusTree {
     }
 
     // Return the begin() iterator for entries_ in the node
-    typename std::vector<KeyNodePtrPair>::iterator GetEntriesBegin() {
-      return entries_.begin();
-    }
+    typename std::vector<KeyNodePtrPair>::iterator GetEntriesBegin() { return entries_.begin(); }
 
     // Return the end() iterator for entries_ in the node
-    typename std::vector<KeyNodePtrPair>::iterator GetEntriesEnd() {
-      return entries_.end();
-    }
+    typename std::vector<KeyNodePtrPair>::iterator GetEntriesEnd() { return entries_.end(); }
 
     // Append the entries in the node passed to the current node
-    void Append (Node *node) override {
+    void Append(Node *node) override {
       TERRIER_ASSERT(!node->IsLeaf(), "Node passed has to be an inner node.");
-      auto node_ptr = dynamic_cast<InnerNode*>(node);
+      auto node_ptr = dynamic_cast<InnerNode *>(node);
       entries_.insert(entries_.end(), node_ptr->GetEntriesBegin(), node_ptr->GetEntriesEnd());
     }
 
@@ -637,93 +623,91 @@ class BPlusTree {
   };
 
   class IndexIterator {
-    LeafNode* current_;
-    int key_offset_;
-    int value_offset_;
+    LeafNode *current_;
+    size_t key_offset_;
+    size_t value_offset_;
 
-    public:
-     KeyType first;
-     ValueType second;
+   public:
+    KeyType first_;
+    ValueType second_;
 
-     IndexIterator(LeafNode* c, size_t k, size_t v) {
-       current_ = c;
-       key_offset_ = k;
-       value_offset_ = v;
-       if (current_ != nullptr) {
-         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
-         first = key_val_iter->first;
-         second = *(std::next(key_val_iter->second.begin(), value_offset_));
-       }
-     }
+    IndexIterator(LeafNode *c, size_t k, size_t v) {
+      current_ = c;
+      key_offset_ = k;
+      value_offset_ = v;
+      if (current_ != nullptr) {
+        auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+        first_ = key_val_iter->first;
+        second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
+      }
+    }
 
-     IndexIterator(const IndexIterator& itr) {
-       current_ = itr.current_;
-       key_offset_ = itr.key_offset_;
-       value_offset_ = itr.value_offset_;
-       first = itr.first;
-       second = itr.second;
-     }
+    IndexIterator(const IndexIterator &itr) {
+      current_ = itr.current_;
+      key_offset_ = itr.key_offset_;
+      value_offset_ = itr.value_offset_;
+      first_ = itr.first_;
+      second_ = itr.second_;
+    }
 
-     bool operator==(const IndexIterator& itr) {
-        return (current_ == itr.current_ &&
-                key_offset_ == itr.key_offset_ &&
-                value_offset_ == itr.value_offset_);
-     }
+    bool operator==(const IndexIterator &itr) {
+      return (current_ == itr.current_ && key_offset_ == itr.key_offset_ && value_offset_ == itr.value_offset_);
+    }
 
-     void operator++() {
-       if (key_offset_ < current_->GetSize() - 1) {
-         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
-           value_offset_++;
-         } else {
-           key_offset_++;
-           value_offset_ = 0;
-         }
-       } else {
-         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
-           value_offset_++;
-         } else {
-           TERRIER_ASSERT(current_ != nullptr, "The ++ operator should not be called for a null iterator");
-           current_ = current_->GetNextPtr();
-           key_offset_ = 0;
-           value_offset_ = 0;
-         }
-       }
-       if (current_ != nullptr) {
-         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
-         first = key_val_iter->first;
-         second = *(std::next(key_val_iter->second.begin(), value_offset_));
-       }
-     }
+    void operator++() {
+      if (key_offset_ < current_->GetSize() - 1) {
+        if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
+          value_offset_++;
+        } else {
+          key_offset_++;
+          value_offset_ = 0;
+        }
+      } else {
+        if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
+          value_offset_++;
+        } else {
+          TERRIER_ASSERT(current_ != nullptr, "The ++ operator should not be called for a null iterator");
+          current_ = current_->GetNextPtr();
+          key_offset_ = 0;
+          value_offset_ = 0;
+        }
+      }
+      if (current_ != nullptr) {
+        auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+        first_ = key_val_iter->first;
+        second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
+      }
+    }
 
-     void operator--() {
-       if (key_offset_ > 0) {
-         if (value_offset_ > 0) {
-           value_offset_--;
-         } else {
-           key_offset_--;
-           value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
-         }
-       } else {
-         if (value_offset_ > 0) {
-           value_offset_--;
-         } else {
-             TERRIER_ASSERT(current_ != nullptr, "The -- operator should not be called for a null iterator");
-             current_ = dynamic_cast<LeafNode *>(current_->GetPrevPtr());
-             if (current_ != nullptr) {
-               key_offset_ = current_->GetSize() - 1;
-               value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
-             } else {
-               key_offset_ = 0;
-               value_offset_ = 0;
-             }
-         }
-       }
-       if (current_ != nullptr) {
-         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
-         first = key_val_iter->first;
-         second = *(std::next(key_val_iter->second.begin(), value_offset_));
-       }
-     }
+    void operator--() {
+      if (key_offset_ > 0) {
+        if (value_offset_ > 0) {
+          value_offset_--;
+        } else {
+          key_offset_--;
+          value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+        }
+      } else {
+        if (value_offset_ > 0) {
+          value_offset_--;
+        } else {
+          TERRIER_ASSERT(current_ != nullptr, "The -- operator should not be called for a null iterator");
+          current_ = dynamic_cast<LeafNode *>(current_->GetPrevPtr());
+          if (current_ != nullptr) {
+            key_offset_ = current_->GetSize() - 1;
+            value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+          } else {
+            key_offset_ = 0;
+            value_offset_ = 0;
+          }
+        }
+      }
+      if (current_ != nullptr) {
+        auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+        first_ = key_val_iter->first;
+        second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
+      }
+    }
   };
 
   // Traverse and find the leaf node that has the given key, populate the stack to store the path
@@ -1028,12 +1012,14 @@ class BPlusTree {
     std::stack<InnerNode *> node_traceback;
     auto node = FindLeafNode(key, &node_traceback);
 
-    if (!node->HasKeyValue(key, value)) {return false;}
+    if (!node->HasKeyValue(key, value)) {
+      return false;
+    }
 
     // Delete entry for leaf node
     node->DeleteEntry(key, value);
 
-    if (node == root_){
+    if (node == root_) {
       // Root is empty
       if (node->GetSize() == 0) {
         delete root_;
@@ -1051,7 +1037,7 @@ class BPlusTree {
     return true;
   }
 
-  IndexIterator begin() {
+  IndexIterator Begin() {
     Node *node = root_;
     while (!node->IsLeaf()) {
       node = node->GetPrevPtr();
@@ -1059,15 +1045,15 @@ class BPlusTree {
     return IndexIterator(dynamic_cast<LeafNode *>(node), 0, 0);
   }
 
-  IndexIterator begin(const KeyType &key) {
+  IndexIterator Begin(const KeyType &key) {
     auto node = FindLeafNode(key);
     auto pos = node->GetPositionToInsert(key);
     return IndexIterator(node, pos, 0);
   }
 
-  IndexIterator end() { return IndexIterator(nullptr, 0, 0); }
+  IndexIterator End() { return IndexIterator(nullptr, 0, 0); }
 
-  IndexIterator end(const KeyType &key) {
+  IndexIterator End(const KeyType &key) {
     auto node = FindLeafNode(key);
     auto pos = node->GetPositionLessThanEqualTo(key);
     if (pos == -1) {
@@ -1081,12 +1067,6 @@ class BPlusTree {
     return IndexIterator(node, pos, val_off);
   }
 
-  bool KeyCmpGreater(const KeyType &key1, const KeyType &key2) {
-    return KEY_CMP_OBJ(key2, key1);
-  }
-
-  bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) {
-    return !KEY_CMP_OBJ(key1, key2);
-  }
+  bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) { return !KEY_CMP_OBJ(key1, key2); }
 };
 }  // namespace terrier::storage::index
