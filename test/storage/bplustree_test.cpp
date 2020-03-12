@@ -5,15 +5,15 @@
 
 namespace terrier::storage::index {
 struct BPlusTreeTests : public TerrierTest {
-  const int num_threads_ =
-      MultiThreadTestUtil::HardwareConcurrency() + (MultiThreadTestUtil::HardwareConcurrency() % 2);
+  const int num_threads_ = 1;
+//      MultiThreadTestUtil::HardwareConcurrency() + (MultiThreadTestUtil::HardwareConcurrency() % 2);
 };
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, SimpleScanKeyTest) {
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   // Inserts the keys
   EXPECT_TRUE(tree->Insert(0, 10));
@@ -45,7 +45,7 @@ TEST_F(BPlusTreeTests, MultipleKeyInsert) {
 
   std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   // Inserts the keys
   for (int i = 0; i < key_num; i++) {
@@ -280,7 +280,7 @@ TEST_F(BPlusTreeTests, SimpleDelete) {
 
   std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   // Inserts the keys
   for (int i = 0; i < key_num; i++) {
@@ -295,7 +295,7 @@ TEST_F(BPlusTreeTests, SimpleDelete) {
     EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
   }
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   delete tree;
 }
@@ -315,7 +315,7 @@ TEST_F(BPlusTreeTests, MultiValueDelete) {
 
   std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   // Inserts the keys
   for (int i = 0; i < key_num; i++) {
@@ -333,7 +333,7 @@ TEST_F(BPlusTreeTests, MultiValueDelete) {
     EXPECT_TRUE(tree->Delete(keys[i], keys[i] + 1));
   }
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   delete tree;
 }
@@ -601,7 +601,7 @@ TEST_F(BPlusTreeTests, RootInnerToLeaf) {
 
   tree->Delete(keys[key_num - 1], keys[key_num - 1]);
 
-  EXPECT_EQ(tree->GetRoot(), nullptr);
+  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
   delete tree;
 }

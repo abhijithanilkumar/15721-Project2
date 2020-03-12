@@ -2,14 +2,16 @@
 
 #include <functional>
 #include <iterator>
+#include <mutex>
+#include <queue>
 #include <stack>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <mutex>
-#include <shared_mutex>
+
 #include "common/macros.h"
 #include "common/spin_latch.h"
+#include "tbb/spin_rw_mutex.h"
 
 namespace terrier::storage::index {
 
@@ -67,7 +69,6 @@ class BPlusTree {
   constexpr static const KeyEqualityChecker KEY_EQ_CHK{};
   constexpr static const ValueEqualityChecker VAL_EQ_CHK{};
 
-
   /*
    * class Node - The base class for node types, i.e. InnerNode and LeafNode
    *
@@ -76,6 +77,9 @@ class BPlusTree {
    */
   class Node {
    public:
+    // Latch
+    tbb::spin_rw_mutex rw_latch;
+
     Node() = default;
     virtual ~Node() = default;
 
@@ -87,6 +91,8 @@ class BPlusTree {
     virtual Node *GetPrevPtr() = 0;
     virtual KeyType GetFirstKey() = 0;
     virtual void Append(Node *node) = 0;
+    virtual bool WillOverflow() = 0;
+    virtual bool WillUnderflow() = 0;
   };
 
   // Root of the tree
@@ -176,9 +182,17 @@ class BPlusTree {
     }
 
     // Check if the given node will underflow after deletion
-    bool WillUnderflow() {
+    bool WillUnderflow() override {
       uint64_t size = entries_.size();
       return ((size - 1) < MIN_KEYS_LEAF_NODE);
+    }
+
+    // Check if a node will overflow after an insertion
+    bool WillOverflow() override {
+      if (entries_.size() == (FAN_OUT - 1)) {
+        return true;
+      }
+      return false;
     }
 
     // Set the previous pointer for the leaf node
@@ -416,10 +430,17 @@ class BPlusTree {
 
     // Check if the given node will underflow after deletion
     // Assumption: Used for borrowing, only looks at no. of keys
-    bool WillUnderflow() {
+    bool WillUnderflow() override {
       // Adding 1 assuming that prev_ptr_ is always occupied
       uint64_t size = entries_.size() + 1;
       return ((size - 1) < MIN_PTR_INNER_NODE);
+    }
+
+    bool WillOverflow() override {
+      if (entries_.size() == (FAN_OUT - 1)) {
+        return true;
+      }
+      return false;
     }
 
     // Returns the predecessor of the node that has the given key
@@ -433,9 +454,15 @@ class BPlusTree {
       int pred_index = index - 1;
 
       // The predecessor is pointed to by prev_ptr_
-      if (pred_index == -1) return prev_ptr_;
+      if (pred_index == -1) {
+        // Get write lock
+//        prev_ptr_->rw_latch.lock();
+        return prev_ptr_;
+      }
 
-      return entries_[pred_index].second;
+      auto pred = entries_[pred_index].second;
+//      pred->rw_latch.lock();
+      return pred;
     }
 
     // Returns the successor of the node that has the given key
@@ -447,7 +474,9 @@ class BPlusTree {
       // The predecessor is pointed to by prev_ptr_
       if (succ_index == entries_.size()) return nullptr;
 
-      return entries_[succ_index].second;
+      auto successor = entries_[succ_index].second;
+//      successor->rw_latch.lock();
+      return successor;
     }
 
     // Return the begin() iterator for entries_ in the node
@@ -712,25 +741,105 @@ class BPlusTree {
   };
 
   // Traverse and find the leaf node that has the given key, populate the stack to store the path
-  LeafNode *FindLeafNode(const KeyType &key, std::stack<InnerNode *> *node_traceback) {
-    Node *node = root_;
+  // When function returns, leaf node with write lock acquired is returned
+  LeafNode *FindLeafNode(const KeyType &key, std::stack<InnerNode *> *node_traceback, bool write_lock_leaf = false) {
+    Node *node;
+
+    // Spin to get the latch on the root (root might be updatesd over iterations)
+    while (!root_->rw_latch.try_lock_read());
+    node = root_;
 
     while (!node->IsLeaf()) {
       auto inner_node = dynamic_cast<InnerNode *>(node);
+
+      // Acquire read lock for the node
+      if (inner_node != root_) {
+        inner_node->rw_latch.lock_read();
+      }
+
+      // If parent exists, release read lock
+      if (!node_traceback->empty()) {
+        auto parent = node_traceback->top();
+        parent->rw_latch.unlock();
+      }
+
+      // Add to stack to store path to found node
       node_traceback->push(inner_node);
+
+      // Find the link to the next node based on the key
       node = inner_node->GetNodePtrForKey(key);
+    }
+
+    if (node != root_) {
+      if (write_lock_leaf) {
+        // Get write lock for leaf
+        node->rw_latch.lock();
+      } else {
+        node->rw_latch.lock_read();
+      }
+    } else {
+      node->rw_latch.unlock();
+      node->rw_latch.lock();
+    }
+
+    // If parent exists, release read lock
+    if (!node_traceback->empty()) {
+      auto parent = node_traceback->top();
+      parent->rw_latch.unlock();
     }
 
     return dynamic_cast<LeafNode *>(node);
   }
 
-  // Traverse the tree to find the leaf node that has the given key
-  LeafNode *FindLeafNode(const KeyType &key) {
-    Node *node = root_;
+  bool IsSafe(Node *node, bool is_delete) {
+    if (is_delete) return !node->WillUnderflow();
+    return !node->WillOverflow();
+  }
 
-    while (node != nullptr && !node->IsLeaf()) {
+  // Traverse and find the leaf node that has the given key, populate the stack to store the path
+  // When function returns, leaf node with write lock acquired is returned
+  LeafNode *FindLeafNodeWrite(const KeyType &key, std::stack<InnerNode *> *node_traceback,
+      std::deque<Node *> *locked_nodes, bool is_delete) {
+    Node *node;
+
+    // Spin to get the latch on the root (root might be updatesd over iterations)
+    while (!root_->rw_latch.try_lock())
+      ;
+    node = root_;
+
+    while (!node->IsLeaf()) {
       auto inner_node = dynamic_cast<InnerNode *>(node);
+
+      // Acquire read lock for the node
+      if (inner_node != root_) {
+        inner_node->rw_latch.lock();
+      }
+
+      // If parent exists, release read lock
+      if (!locked_nodes->empty() && IsSafe(node, is_delete)) {
+        ReleaseNodeLocks(locked_nodes);
+      }
+
+      // After releasing all locks for parents
+      locked_nodes->push_back(inner_node);
+
+      // Add to stack to store path to found node
+      node_traceback->push(inner_node);
+
+      // Find the link to the next node based on the key
       node = inner_node->GetNodePtrForKey(key);
+    }
+
+    if (node != root_) {
+      // Get write lock for leaf
+      node->rw_latch.lock();
+    }
+
+    locked_nodes->push_back(node);
+
+    // If parent exists, release read lock
+    if (!locked_nodes->empty() && IsSafe(node, is_delete)) {
+      ReleaseNodeLocks(locked_nodes);
     }
 
     return dynamic_cast<LeafNode *>(node);
@@ -826,8 +935,18 @@ class BPlusTree {
     dst->Append(src);
   }
 
+  void RemoveFromLockList(Node *tmp, std::deque<Node *> *locked_nodes) {
+    for (auto it = locked_nodes->begin(); it != locked_nodes->end(); ++it) {
+      if (*it == tmp) {
+        (*it)->rw_latch.unlock();
+        locked_nodes->erase(it);
+        return;
+      }
+    }
+  }
+
   // Balance a tree on deletion at leaf node
-  void Balance(LeafNode *node, std::stack<InnerNode *> *node_traceback) {
+  void Balance(LeafNode *node, std::stack<InnerNode *> *node_traceback, std::deque<Node *> *locked_nodes) {
     // Handle leaf merge separately
     auto parent_node = node_traceback->top();
     auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
@@ -851,6 +970,8 @@ class BPlusTree {
       if (node->GetNextPtr() != nullptr) {
         node->GetNextPtr()->SetPrevPtr(left_sibling);
       }
+      // Remove from list of nodes with active lock
+      RemoveFromLockList(node, locked_nodes);
       delete node;
     } else {
       CoalesceLeaf(right_sibling, node, parent_node);
@@ -872,6 +993,7 @@ class BPlusTree {
           // Only 1 pointer left in the root
           auto tmp = root_;
           root_ = root_->GetPrevPtr();
+          RemoveFromLockList(tmp, locked_nodes);
           delete tmp;
         }
         return;
@@ -895,6 +1017,8 @@ class BPlusTree {
       // Parent node entry for child is also deleted
       if (left_inner) {
         CoalesceInner(inner_node, left_inner, parent_node);
+        // Remove from list of nodes with active lock
+        RemoveFromLockList(inner_node, locked_nodes);
         delete inner_node;
       } else {
         CoalesceInner(right_inner, inner_node, parent_node);
@@ -906,34 +1030,56 @@ class BPlusTree {
   }
 
  public:
-  // Global latch for the entire tree
-  mutable std::shared_mutex tree_lock_;
-  BPlusTree() { root_ = nullptr; }
+  BPlusTree() { root_ = new LeafNode(); }
 
   // Returns the root of the B+ tree
   Node *GetRoot() { return root_; }
 
+  void ReleaseNodeLocks(std::deque<Node *> *locked_nodes) {
+    // Release all held locks
+    while (!locked_nodes->empty()) {
+      auto node = locked_nodes->front();
+      locked_nodes->pop_front();
+      node->rw_latch.unlock();
+    }
+  }
+
   // API to insert a new (key, value) pair into the tree
   bool Insert(const KeyType &key, const ValueType &value, bool unique_key = false) {
-    // Avoid races
-    std::unique_lock lock(tree_lock_);
     std::stack<InnerNode *> node_traceback;
     LeafNode *insert_node;
 
-    // If tree is empty
-    if (root_ == nullptr) {
-      root_ = new LeafNode();
-      insert_node = dynamic_cast<LeafNode *>(root_);
-    } else {
-      insert_node = FindLeafNode(key, &node_traceback);  // Node traceback passed as ref
-    }
+    insert_node = FindLeafNode(key, &node_traceback, true);  // Node traceback passed as ref
 
     // If there were conflicting key values
     if (insert_node->HasKeyValue(key, value) || (unique_key && insert_node->HasKey(key))) {
+      insert_node->rw_latch.unlock();
       return false;  // The traverse function aborts the insert as key, val is present
     }
 
-    InsertAndPropagate(key, value, insert_node, &node_traceback);
+    if (!insert_node->WillOverflow()) {
+      InsertAndPropagate(key, value, insert_node, &node_traceback);
+      insert_node->rw_latch.unlock();
+    } else {
+      // Release write lock aquired while finding
+      insert_node->rw_latch.unlock();
+
+      while(!node_traceback.empty()) {node_traceback.pop();}
+
+      // A queue of nodes which contain write locks
+      std::deque<Node *> locked_nodes;
+      insert_node = FindLeafNodeWrite(key, &node_traceback, &locked_nodes, false);  // Node traceback passed as ref
+
+      // If there were conflicting key values
+      if (insert_node->HasKeyValue(key, value) || (unique_key && insert_node->HasKey(key))) {
+        ReleaseNodeLocks(&locked_nodes);
+        return false;  // The traverse function aborts the insert as key, val is present
+      }
+
+      InsertAndPropagate(key, value, insert_node, &node_traceback);
+
+      ReleaseNodeLocks(&locked_nodes);
+    }
 
     return true;
   }
@@ -941,48 +1087,69 @@ class BPlusTree {
   // API to perform (key, value) pair insert based on a predicate into the tree
   bool ConditionalInsert(const KeyType &key, const ValueType &value, std::function<bool(const ValueType)> predicate,
                          bool *predicate_satisfied) {
-    // Avoid races
-    std::unique_lock lock(tree_lock_);
     LeafNode *insert_node;
     std::stack<InnerNode *> node_traceback;
 
-    // If tree is empty
-    if (root_ == nullptr) {
-      insert_node = new LeafNode();
-      root_ = insert_node;
-    } else {
-      insert_node = FindLeafNode(key, &node_traceback);  // Node traceback passed as ref
-    }
+    insert_node = FindLeafNode(key, &node_traceback, true);  // Node traceback passed as ref
 
     // If there were conflicting key values
     if (insert_node->SatisfiesPredicate(key, predicate)) {
+      insert_node->rw_latch.unlock();
       *predicate_satisfied = true;
       return false;  // The traverse function aborts the insert as key, val is present
     }
 
     *predicate_satisfied = false;
-    InsertAndPropagate(key, value, insert_node, &node_traceback);
+
+    if (!insert_node->WillOverflow()) {
+      InsertAndPropagate(key, value, insert_node, &node_traceback);
+      insert_node->rw_latch.unlock();
+    } else {
+      // Release write lock aquired
+      insert_node->rw_latch.unlock();
+
+      // Redo the search by acquiring write locks
+
+      while (!node_traceback.empty()) {
+        node_traceback.pop();
+      }
+
+      // A queue of nodes which contain write locks
+      std::deque<Node *> locked_nodes;
+      insert_node = FindLeafNodeWrite(key, &node_traceback, &locked_nodes, false);  // Node traceback passed as ref
+
+      // If there were conflicting key values
+      if (insert_node->SatisfiesPredicate(key, predicate)) {
+        ReleaseNodeLocks(&locked_nodes);
+        *predicate_satisfied = true;
+        return false;  // The traverse function aborts the insert as key, val is present
+      }
+
+      *predicate_satisfied = false;
+
+      InsertAndPropagate(key, value, insert_node, &node_traceback);
+
+      ReleaseNodeLocks(&locked_nodes);
+    }
 
     return true;
   }
 
   // API to fetch the values stored in the corresponding key and populate a vector with it
   void GetValue(const KeyType &key, typename std::vector<ValueType> *results) {
-    // Avoid races
-    std::shared_lock lock(tree_lock_);
+    std::stack<InnerNode *> node_traceback;
 
-    LeafNode *node = FindLeafNode(key);
-
-    if (node == nullptr) {
-      return;
-    }
+    LeafNode *node = FindLeafNode(key, &node_traceback, false);
 
     node->ScanAndPopulateResults(key, results);
+
+    // Release read lock
+    node->rw_latch.unlock();
   }
 
   // API to calculate heap usage
   size_t GetHeapUsage() {
-    if (root_ == nullptr) {
+    if (root_->GetSize() == 0) {
       return 0;
     }
 
@@ -995,7 +1162,7 @@ class BPlusTree {
 
     Node *node = root_;
 
-    if (node == nullptr) return 0;
+    if (node->GetSize() == 0) return 0;
 
     while (!node->IsLeaf()) {
       height++;
@@ -1007,34 +1174,54 @@ class BPlusTree {
 
   // API to delete an entry in the tree
   bool Delete(const KeyType &key, const ValueType &value) {
-    // Avoid races
-    std::unique_lock lock(tree_lock_);
-
-    if (root_ == nullptr) return false;
-
     std::stack<InnerNode *> node_traceback;
-    auto node = FindLeafNode(key, &node_traceback);
+    auto node = FindLeafNode(key, &node_traceback, true);
 
     if (!node->HasKeyValue(key, value)) {
+      node->rw_latch.unlock();
       return false;
     }
 
-    // Delete entry for leaf node
-    node->DeleteEntry(key, value);
-
     if (node == root_) {
-      // Root is empty
-      if (node->GetSize() == 0) {
-        delete root_;
-        root_ = nullptr;
-      }
+      node->DeleteEntry(key, value);
+      node->rw_latch.unlock();
+      // Do nothing as we allow the root to have 0 entries when it is a leaf node
       return true;
     }
 
     // Must propagate
-    if (node->IsUnderflow()) {
-      // Balance at leaf level
-      Balance(node, &node_traceback);
+    if (node->WillUnderflow()) {
+      // Release the lock
+      node->rw_latch.unlock();
+
+      // Delete entry for leaf node
+      node->DeleteEntry(key, value);
+
+      while (!node_traceback.empty()) {
+        node_traceback.pop();
+      }
+
+      std::deque<Node *> locked_nodes;
+
+      node = FindLeafNodeWrite(key, &node_traceback, &locked_nodes, true);
+
+      if (node == root_) {
+        ReleaseNodeLocks(&locked_nodes);
+        // Do nothing as we allow the root to have 0 entries when it is a leaf node
+        return true;
+      }
+
+      // Must propagate
+      if (node->IsUnderflow()) {
+        // Balance at leaf level
+        Balance(node, &node_traceback, &locked_nodes);
+      }
+
+      ReleaseNodeLocks(&locked_nodes);
+    } else {
+      // Delete entry for leaf node
+      node->DeleteEntry(key, value);
+      node->rw_latch.unlock();
     }
 
     return true;
@@ -1050,8 +1237,9 @@ class BPlusTree {
   }
 
   IndexIterator Begin(const KeyType &key) {
-    auto node = FindLeafNode(key);
-    if (node == nullptr) return End();
+    std::stack<InnerNode *> node_traceback;
+    auto node = FindLeafNode(key, &node_traceback, false);
+    if (node->GetSize() == 0) return End();
     auto pos = node->GetPositionToInsert(key);
 
     if (pos >= node->GetSize()) {
@@ -1064,8 +1252,9 @@ class BPlusTree {
   IndexIterator End() { return IndexIterator(nullptr, 0, 0); }
 
   IndexIterator End(const KeyType &key) {
-    auto node = FindLeafNode(key);
-    if (node == nullptr) return End();
+    std::stack<InnerNode *> node_traceback;
+    auto node = FindLeafNode(key, &node_traceback, false);
+    if (node->GetSize() == 0) return End();
     auto pos = node->GetPositionLessThanEqualTo(key);
     if (pos == -1) {
       node = dynamic_cast<LeafNode *>(node->GetPrevPtr());
