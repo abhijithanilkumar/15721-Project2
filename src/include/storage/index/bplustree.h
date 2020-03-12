@@ -125,39 +125,38 @@ class BPlusTree {
     // Find the sorted position for a new key
     // TODO(abhijithanilkumar): Optimize and use binary search
     int GetPositionToInsert(const KeyType &key) {
-      int i;
+      ValueSet dummy_set;
+      KeyValueSetPair entries_key = std::make_pair(key, dummy_set);
 
-      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
-        if (!KEY_CMP_OBJ(entries_[i].first, key)) {
-          break;
-        }
-      }
+      auto it = std::lower_bound(entries_.begin(), entries_.end(), entries_key,
+          [](const auto &a, const auto &b)
+           { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return i;
+      return (it - entries_.begin());
     }
 
     // Returns the last index whose key less than or equal to the given key
-    // TODO(abhijithanilkumar): Optimize and use binary search
     int GetPositionLessThanEqualTo(const KeyType &key) {
-      int i;
+      ValueSet dummy_set;
+      KeyValueSetPair entries_key = std::make_pair(key, dummy_set);
 
-      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
-        if (KEY_CMP_OBJ(key, entries_[i].first)) {
-          break;
-        }
-      }
+      auto it = std::lower_bound(entries_.begin(), entries_.end(), entries_key,
+                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(b.first, a.first); });
 
-      return (i - 1);
+      return (it - entries_.begin() - 1);
     }
 
     // Return an iterator to the position of the key
     typename std::vector<KeyValueSetPair>::iterator GetPositionOfKey(const KeyType &key) {
-      auto it = entries_.begin();
+      ValueSet dummy_set;
+      KeyValueSetPair entries_key = std::make_pair(key, dummy_set);
 
-      while (it != entries_.end()) {
-        if (KEY_EQ_CHK(it->first, key)) return it;
-        it++;
-      }
+      auto it = std::lower_bound(entries_.begin(), entries_.end(), entries_key,
+                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
+
+      // Not guarenteed that the key exists in the entries
+      if (it == entries_.end() || !KEY_EQ_CHK(it->first, key))
+        return entries_.end();
 
       return it;
     }
@@ -188,23 +187,25 @@ class BPlusTree {
 
     // Check if the given key is present in the node
     bool HasKey(const KeyType &key) {
-      // TODO(abhijithanilkumar): Optimize using STL function
-      for (auto it = entries_.begin(); it != entries_.end(); it++) {
-        if (KEY_EQ_CHK(it->first, key)) return true;
-      }
+      auto it = GetPositionOfKey(key);
 
-      return false;
+      if (it == entries_.end())
+        return false;
+
+      return true;
     }
 
     // Check if the given (key, value) pair is present in the node
     bool HasKeyValue(const KeyType &key, const ValueType &value) {
-      // TODO(abhijithanilkumar): Optimize using STL function
-      for (auto it = entries_.begin(); it != entries_.end(); it++) {
-        if (KEY_EQ_CHK(it->first, key)) {
-          auto loc = it->second.find(value);
-          if (loc != it->second.end()) return true;
-        }
-      }
+      auto it = GetPositionOfKey(key);
+
+      if (it == entries_.end())
+        return false;
+
+      auto loc = it->second.find(value);
+
+      if (loc != it->second.end())
+        return true;
 
       return false;
     }
@@ -371,31 +372,25 @@ class BPlusTree {
     Node *GetPrevPtr() override { return prev_ptr_; }
 
     // Returns the first index whose key greater than or equal to the given key
-    // TODO(abhijithanilkumar): Optimize and use binary search
     int GetPositionGreaterThanEqualTo(const KeyType &key) {
-      int i;
+      Node *dummy_node = nullptr;
+      KeyNodePtrPair entries_key = std::make_pair(key, dummy_node);
 
-      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
-        if (!KEY_CMP_OBJ(entries_[i].first, key)) {
-          break;
-        }
-      }
+      auto it = std::lower_bound(entries_.begin(), entries_.end(), entries_key,
+                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return i;
+      return (it - entries_.begin());
     }
 
     // Returns the last index whose key less than or equal to the given key
-    // TODO(abhijithanilkumar): Optimize and use binary search
     int GetPositionLessThanEqualTo(const KeyType &key) {
-      int i;
+      Node *dummy_node = nullptr;
+      KeyNodePtrPair entries_key = std::make_pair(key, dummy_node);
 
-      for (i = 0; i < static_cast<int>(entries_.size()); i++) {
-        if (KEY_CMP_OBJ(key, entries_[i].first)) {
-          break;
-        }
-      }
+      auto it = std::upper_bound(entries_.begin(), entries_.end(), entries_key,
+                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return (i - 1);
+      return (int) (it - entries_.begin()) - 1;
     }
 
     // Returns size (number of keys) in the node
@@ -551,13 +546,13 @@ class BPlusTree {
 
     // Returns the (key, ptr) pair iterator corresponding to the key
     typename std::vector<KeyNodePtrPair>::iterator GetKeyNodePtrPair(const KeyType &key) {
-      for (auto it = entries_.begin(); it + 1 != entries_.end(); it++) {
-        if (!KEY_CMP_OBJ(key, it->first) && KEY_CMP_OBJ(key, (it + 1)->first)) {
-          return it;
-        }
-      }
+      int pos = GetPositionLessThanEqualTo(key);
 
-      return (entries_.end() - 1);
+      if (pos == -1)
+        return entries_.end() - 1;
+
+      else
+        return entries_.begin() + pos;
     }
 
     // Returns the pointer corresponding to the key, used to traverse
