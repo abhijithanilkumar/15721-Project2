@@ -140,10 +140,10 @@ class BPlusTree {
       ValueSet dummy_set;
       KeyValueSetPair entries_key = std::make_pair(key, dummy_set);
 
-      auto it = std::lower_bound(entries_.begin(), entries_.end(), entries_key,
-                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(b.first, a.first); });
+      auto it = std::upper_bound(entries_.begin(), entries_.end(), entries_key,
+                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return (it - entries_.begin() - 1);
+      return (int)(it - entries_.begin()) - 1;
     }
 
     // Return an iterator to the position of the key
