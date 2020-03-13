@@ -163,6 +163,7 @@ class BPlusTreeIndex final : public Index {
     if (low_key_exists) index_low_key.SetFromProjectedRow(*low_key, metadata_, num_attrs);
     if (high_key_exists) index_high_key.SetFromProjectedRow(*high_key, metadata_, num_attrs);
 
+    std::shared_lock lock(bplustree_->tree_lock_);
     // Perform lookup in BwTree
     auto scan_itr = low_key_exists ? bplustree_->Begin(index_low_key) : bplustree_->Begin();
 
@@ -184,6 +185,7 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
+    std::shared_lock lock(bplustree_->tree_lock_);
     // Perform lookup in BwTree
     auto scan_itr = bplustree_->End(index_high_key);
 
@@ -205,6 +207,7 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
+    std::shared_lock lock(bplustree_->tree_lock_);
     auto scan_itr = bplustree_->End(index_high_key);
 
     while (value_list->size() < limit && !(scan_itr == bplustree_->End()) &&
