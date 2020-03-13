@@ -1042,6 +1042,7 @@ class BPlusTree {
 
   IndexIterator Begin() {
     Node *node = root_;
+    if (node == nullptr) return End();
     while (!node->IsLeaf()) {
       node = node->GetPrevPtr();
     }
@@ -1050,7 +1051,13 @@ class BPlusTree {
 
   IndexIterator Begin(const KeyType &key) {
     auto node = FindLeafNode(key);
+    if (node == nullptr) return End();
     auto pos = node->GetPositionToInsert(key);
+
+    if (pos >= node->GetSize()) {
+      node = node->GetNextPtr();
+      pos = 0;
+    }
     return IndexIterator(node, pos, 0);
   }
 
@@ -1058,6 +1065,7 @@ class BPlusTree {
 
   IndexIterator End(const KeyType &key) {
     auto node = FindLeafNode(key);
+    if (node == nullptr) return End();
     auto pos = node->GetPositionLessThanEqualTo(key);
     if (pos == -1) {
       node = dynamic_cast<LeafNode *>(node->GetPrevPtr());
