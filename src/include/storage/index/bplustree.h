@@ -249,6 +249,11 @@ class BPlusTree {
       // Erase the right half from the current node
       entries_.erase(entries_.begin() + MIN_KEYS_LEAF_NODE, entries_.end());
 
+      new_node->SetNextPtr(next_ptr_);
+      if (next_ptr_) {
+        next_ptr_->SetPrevPtr(new_node);
+      }
+
       // Set the forward sibling pointer of the current node
       next_ptr_ = new_node;
 
