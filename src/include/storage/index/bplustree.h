@@ -68,6 +68,8 @@ class BPlusTree {
   constexpr static const KeyComparator KEY_CMP_OBJ{};
   constexpr static const KeyEqualityChecker KEY_EQ_CHK{};
   constexpr static const ValueEqualityChecker VAL_EQ_CHK{};
+  // We should protect the root ptr separately
+  tbb::spin_rw_mutex root_latch_;
 
   /*
    * class Node - The base class for node types, i.e. InnerNode and LeafNode
@@ -506,47 +508,6 @@ class BPlusTree {
     // Set pre_ptr for the inner node (this will point to a node in the lower level)
     void SetPrevPtr(Node *node) override { prev_ptr_ = node; }
 
-    // Insert the new node appropriately in the tree, propagating the changes up till root if necessary
-    void InsertNodePtr(Node *child_node, Node **tree_root, std::stack<InnerNode *> *node_traceback) {
-      InnerNode *current_node = this;
-      // Since child_node is always a leaf node, we do not remove first key here
-      TERRIER_ASSERT(child_node->IsLeaf(), "child_node has to be a leaf node");
-      KeyType middle_key = dynamic_cast<LeafNode *>(child_node)->GetFirstKey();
-
-      // If current node is the root or has a parent
-      while (current_node == *tree_root || !node_traceback->empty()) {
-        // Insert child node into the current node
-        current_node->Insert(middle_key, child_node);
-
-        // Overflow
-        if (current_node->IsOverflow()) {
-          Node *new_node = current_node->Split();
-          middle_key = dynamic_cast<InnerNode *>(new_node)->RemoveFirstKey();
-
-          // Context we have is the left node
-          // new_node is the right node
-          if (current_node == *tree_root) {
-            TERRIER_ASSERT(node_traceback->empty(), "Stack should be empty when current node is the root");
-
-            auto new_root = new InnerNode();
-            // Will basically insert the key and node as node is empty
-            new_root->Insert(middle_key, new_node);
-            new_root->SetPrevPtr(current_node);
-            *tree_root = new_root;
-            return;
-          }
-
-          // Update current_node to the parent
-          current_node = node_traceback->top();
-          node_traceback->pop();
-          child_node = new_node;
-        } else {
-          // Insertion does not cause overflow
-          break;
-        }
-      }
-    }
-
     // Split the inner node and return the new node created
     Node *Split() override {
       auto new_node = new InnerNode();
@@ -746,7 +707,13 @@ class BPlusTree {
     Node *node;
 
     // Spin to get the latch on the root (root might be updatesd over iterations)
-    while (!root_->rw_latch.try_lock_read());
+    if (write_lock_leaf) {
+      root_latch_.lock();
+      root_->rw_latch.lock();
+    } else {
+      root_latch_.lock_read();
+      root_->rw_latch.lock_read();
+    }
     node = root_;
 
     while (!node->IsLeaf()) {
@@ -761,6 +728,7 @@ class BPlusTree {
       if (!node_traceback->empty()) {
         auto parent = node_traceback->top();
         parent->rw_latch.unlock();
+        if (parent == root_) root_latch_.unlock();
       }
 
       // Add to stack to store path to found node
@@ -777,15 +745,13 @@ class BPlusTree {
       } else {
         node->rw_latch.lock_read();
       }
-    } else {
-      node->rw_latch.unlock();
-      node->rw_latch.lock();
     }
 
     // If parent exists, release read lock
     if (!node_traceback->empty()) {
       auto parent = node_traceback->top();
       parent->rw_latch.unlock();
+      if (parent == root_) root_latch_.unlock();
     }
 
     return dynamic_cast<LeafNode *>(node);
@@ -802,9 +768,8 @@ class BPlusTree {
       std::deque<Node *> *locked_nodes, bool is_delete) {
     Node *node;
 
-    // Spin to get the latch on the root (root might be updatesd over iterations)
-    while (!root_->rw_latch.try_lock())
-      ;
+    root_latch_.lock();
+    root_->rw_latch.lock();
     node = root_;
 
     while (!node->IsLeaf()) {
@@ -835,12 +800,12 @@ class BPlusTree {
       node->rw_latch.lock();
     }
 
-    locked_nodes->push_back(node);
-
-    // If parent exists, release read lock
+    // If parent exists, release locks
     if (!locked_nodes->empty() && IsSafe(node, is_delete)) {
       ReleaseNodeLocks(locked_nodes);
     }
+
+    locked_nodes->push_back(node);
 
     return dynamic_cast<LeafNode *>(node);
   }
@@ -848,6 +813,7 @@ class BPlusTree {
   // Insert a new (key, value) pair in the tree and rebalance the tree
   void InsertAndPropagate(const KeyType &key, const ValueType &value, LeafNode *insert_node,
                           std::stack<InnerNode *> *node_traceback) {
+//    TERRIER_ASSERT(!insert_node->rw_latch.try_lock(), "try_lock should fail because lock is already acquired");
     insert_node->Insert(key, value);
     // If insertion causes overflow
     if (insert_node->IsOverflow()) {
@@ -861,6 +827,8 @@ class BPlusTree {
         new_root->Insert(child_node->GetFirstKey(), child_node);
         new_root->SetPrevPtr(insert_node);
         root_ = dynamic_cast<Node *>(new_root);
+        // Is this correct?
+        root_latch_.unlock();
         return;
       }
 
@@ -868,7 +836,45 @@ class BPlusTree {
       node_traceback->pop();
 
       // Insert the leaf node at the inner node and propagate
-      parent_node->InsertNodePtr(child_node, &root_, node_traceback);
+      InnerNode *current_node = parent_node;
+      // Since child_node is always a leaf node, we do not remove first key here
+      TERRIER_ASSERT(child_node->IsLeaf(), "child_node has to be a leaf node");
+      KeyType middle_key = child_node->GetFirstKey();
+      Node *child = child_node;
+
+      // If current node is the root or has a parent
+      while (current_node == root_ || !node_traceback->empty()) {
+        // Insert child node into the current node
+        current_node->Insert(middle_key, child);
+
+        // Overflow
+        if (current_node->IsOverflow()) {
+          Node *new_node = current_node->Split();
+          middle_key = dynamic_cast<InnerNode *>(new_node)->RemoveFirstKey();
+
+          // Context we have is the left node
+          // new_node is the right node
+          if (current_node == root_) {
+            TERRIER_ASSERT(node_traceback->empty(), "Stack should be empty when current node is the root");
+
+            auto new_root = new InnerNode();
+            // Will basically insert the key and node as node is empty
+            new_root->Insert(middle_key, new_node);
+            new_root->SetPrevPtr(current_node);
+            root_ = new_root;
+            root_latch_.unlock();
+            return;
+          }
+
+          // Update current_node to the parent
+          current_node = node_traceback->top();
+          node_traceback->pop();
+          child = new_node;
+        } else {
+          // Insertion does not cause overflow
+          break;
+        }
+      }
     }
   }
 
@@ -939,6 +945,9 @@ class BPlusTree {
     for (auto it = locked_nodes->begin(); it != locked_nodes->end(); ++it) {
       if (*it == tmp) {
         (*it)->rw_latch.unlock();
+        if (*it == root_) {
+          root_latch_.unlock();
+        }
         locked_nodes->erase(it);
         return;
       }
@@ -1041,6 +1050,7 @@ class BPlusTree {
       auto node = locked_nodes->front();
       locked_nodes->pop_front();
       node->rw_latch.unlock();
+      if (node == root_) root_latch_.unlock();
     }
   }
 
@@ -1054,15 +1064,18 @@ class BPlusTree {
     // If there were conflicting key values
     if (insert_node->HasKeyValue(key, value) || (unique_key && insert_node->HasKey(key))) {
       insert_node->rw_latch.unlock();
+      if (insert_node == root_) root_latch_.unlock();
       return false;  // The traverse function aborts the insert as key, val is present
     }
 
     if (!insert_node->WillOverflow()) {
       InsertAndPropagate(key, value, insert_node, &node_traceback);
       insert_node->rw_latch.unlock();
+      if (insert_node == root_) root_latch_.unlock();
     } else {
       // Release write lock aquired while finding
       insert_node->rw_latch.unlock();
+      if (insert_node == root_) root_latch_.unlock();
 
       while(!node_traceback.empty()) {node_traceback.pop();}
 
@@ -1095,6 +1108,7 @@ class BPlusTree {
     // If there were conflicting key values
     if (insert_node->SatisfiesPredicate(key, predicate)) {
       insert_node->rw_latch.unlock();
+      if (insert_node == root_) root_latch_.unlock();
       *predicate_satisfied = true;
       return false;  // The traverse function aborts the insert as key, val is present
     }
@@ -1104,9 +1118,11 @@ class BPlusTree {
     if (!insert_node->WillOverflow()) {
       InsertAndPropagate(key, value, insert_node, &node_traceback);
       insert_node->rw_latch.unlock();
+      if (insert_node == root_) root_latch_.unlock();
     } else {
       // Release write lock aquired
       insert_node->rw_latch.unlock();
+      if (insert_node == root_) root_latch_.unlock();
 
       // Redo the search by acquiring write locks
 
@@ -1145,6 +1161,7 @@ class BPlusTree {
 
     // Release read lock
     node->rw_latch.unlock();
+    if (node == root_) root_latch_.unlock();
   }
 
   // API to calculate heap usage

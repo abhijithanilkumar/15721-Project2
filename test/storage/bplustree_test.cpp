@@ -4,9 +4,19 @@
 #include "test_util/test_harness.h"
 
 namespace terrier::storage::index {
-struct BPlusTreeTests : public TerrierTest {
-  const int num_threads_ = 1;
-//      MultiThreadTestUtil::HardwareConcurrency() + (MultiThreadTestUtil::HardwareConcurrency() % 2);
+class BPlusTreeTests : public TerrierTest {
+ public:
+  const uint32_t num_threads_ = 8;
+  common::WorkerPool thread_pool_{num_threads_, {}};
+
+ protected:
+  void SetUp() {
+    thread_pool_.Startup();
+  }
+
+  void TearDown() {
+    thread_pool_.Shutdown();
+  }
 };
 
 // NOLINTNEXTLINE
@@ -43,7 +53,7 @@ TEST_F(BPlusTreeTests, MultipleKeyInsert) {
     keys.emplace_back(i);
   }
 
-  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+//  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
   EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
 
@@ -114,9 +124,53 @@ TEST_F(BPlusTreeTests, DuplicateInsert) {
   delete tree;
 }
 
+
+// NOLINTNEXTLINE
+TEST_F(BPlusTreeTests, MultiThreadedInsertTest) {
+const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+
+auto *const tree = new BPlusTree<int64_t, int64_t>;
+std::vector<int64_t> keys;
+keys.reserve(key_num);
+int64_t work_per_thread = key_num  / num_threads_;
+for (int64_t i = 0; i < key_num; ++i) {
+  keys.emplace_back(i);
+}
+std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+
+auto workload = [&](uint32_t worker_id) {
+
+  int64_t  start = work_per_thread * worker_id;
+  int64_t  end = work_per_thread * (worker_id + 1);
+
+  // Inserts the keys
+  for (int i = start; i < end; i++) {
+    tree->Insert(keys[i], keys[i]);
+  }
+};
+
+// run the workload
+for (uint32_t i = 0; i < num_threads_; i++) {
+thread_pool_.SubmitTask([i, &workload] { workload(i); });
+}
+thread_pool_.WaitUntilAllFinished();
+
+// Ensure all values are present
+for (int i = 0; i < key_num; i++) {
+std::vector<int64_t> results;
+tree->GetValue(keys[i], &results);
+EXPECT_EQ(results.size(), 1);
+EXPECT_EQ(results[0], keys[i]);
+}
+
+// The root must have split
+EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+delete tree;
+}
+
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, RootSplitTest) {
-  const int key_num = FAN_OUT;
+const int key_num = FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -606,6 +660,346 @@ TEST_F(BPlusTreeTests, RootInnerToLeaf) {
   delete tree;
 }
 
+
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, SimpleDelete) {
+//  const int key_num = FAN_OUT - 1;
+//
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  std::vector<int64_t> keys;
+//  keys.reserve(key_num);
+//
+//  for (int64_t i = 0; i < key_num; i++) {
+//    keys.emplace_back(i);
+//  }
+//
+//  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+//
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(keys[i], keys[i]));
+//  }
+//
+//  // The root node should not have split
+//  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+//
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_EQ(tree->GetRoot()->GetSize(), key_num - i);
+//    EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
+//  }
+//
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, MultiValueDelete) {
+//  const int key_num = FAN_OUT - 1;
+//
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  std::vector<int64_t> keys;
+//  keys.reserve(key_num);
+//
+//  for (int64_t i = 0; i < key_num; i++) {
+//    keys.emplace_back(i);
+//  }
+//
+//  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+//
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(keys[i], keys[i]));
+//    EXPECT_TRUE(tree->Insert(keys[i], keys[i] + 1));
+//  }
+//
+//  // The root node should not have split
+//  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+//
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_EQ(tree->GetRoot()->GetSize(), key_num - i);
+//    EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
+//    EXPECT_EQ(tree->GetRoot()->GetSize(), key_num - i);
+//    EXPECT_TRUE(tree->Delete(keys[i], keys[i] + 1));
+//  }
+//
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, CoalesceLeavesOnDelete) {
+//  const int key_num = FAN_OUT;
+//
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(i, i));
+//  }
+//
+//  // The root node should have split
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_TRUE(tree->Delete(0, 0));
+//
+//  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), FAN_OUT - 1);
+//
+//  tree->Insert(0, 0);
+//
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_TRUE(tree->Delete(FAN_OUT - 1, FAN_OUT - 1));
+//
+//  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), FAN_OUT - 1);
+//
+//  // Ensure all values are present
+//  for (int i = 0; i < key_num - 1; i++) {
+//    std::vector<int64_t> results;
+//    tree->GetValue(i, &results);
+//    EXPECT_EQ(results.size(), 1);
+//    EXPECT_EQ(results[0], i);
+//  }
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
+//  const int key_num = FAN_OUT;
+//
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(i, i));
+//  }
+//
+//  // The root node should have split
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_TRUE(tree->Insert(FAN_OUT, FAN_OUT));
+//
+//  EXPECT_TRUE(tree->Delete(0, 0));
+//
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_EQ(tree->GetRoot()->GetPrevPtr()->GetSize(), MIN_KEYS_LEAF_NODE);
+//
+//  // Ensure all values are present
+//  for (int i = 1; i < key_num + 1; i++) {
+//    std::vector<int64_t> results;
+//    tree->GetValue(i, &results);
+//    EXPECT_EQ(results.size(), 1);
+//    EXPECT_EQ(results[0], i);
+//  }
+//
+//  std::vector<int64_t> results;
+//  tree->GetValue(0, &results);
+//
+//  EXPECT_EQ(results.size(), 0);
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+//
+//  // Borrow from left
+//  EXPECT_TRUE(tree->Insert(0, 0));
+//
+//  EXPECT_TRUE(tree->Delete(FAN_OUT, FAN_OUT));
+//
+//  for (int i = 0; i < key_num; i++) {
+//    std::vector<int64_t> results1;
+//    tree->GetValue(i, &results1);
+//    EXPECT_EQ(results1.size(), 1);
+//    EXPECT_EQ(results1[0], i);
+//  }
+//
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, BorrowFromInner) {
+//  const int key_num = 55;
+//  std::vector<int64_t> results;
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(i, i));
+//  }
+//
+//  // The root node should have split
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+//
+//  // Test borrow right
+//  EXPECT_TRUE(tree->Delete(0, 0));
+//
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  // Ensure all values are present
+//  for (int i = 1; i < 50; i++) {
+//    results.clear();
+//    tree->GetValue(i, &results);
+//    EXPECT_EQ(results.size(), 1);
+//    EXPECT_EQ(results[0], i);
+//  }
+//
+//  results.clear();
+//  tree->GetValue(0, &results);
+//
+//  EXPECT_EQ(results.size(), 0);
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+//
+//  // Test borrow left
+//
+//  // Cause overflow in leaf and create one more entry in left inner node
+//  EXPECT_TRUE(tree->Insert(0, 0));
+//
+//  // Cause right inner node to underflow
+//  EXPECT_TRUE(tree->Delete(50, 50));
+//
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  // Ensure all values are present
+//  for (int i = 0; i < 55; i++) {
+//    if (i == 50) continue;
+//    results.clear();
+//    tree->GetValue(i, &results);
+//    EXPECT_EQ(results.size(), 1);
+//    EXPECT_EQ(results[0], i);
+//  }
+//
+//  results.clear();
+//  tree->GetValue(50, &results);
+//
+//  EXPECT_EQ(results.size(), 0);
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, CoalesceToRightInner) {
+//  const int key_num = 55;
+//  std::vector<int64_t> results;
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(i, i));
+//  }
+//
+//  // The root node should have split
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+//
+//  // Test Coalesce to right
+//  EXPECT_TRUE(tree->Delete(50, 50));
+//  EXPECT_TRUE(tree->Delete(0, 0));
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  // Ensure all values are present
+//  for (int i = 1; i < 55; i++) {
+//    if (i == 50) continue;
+//    results.clear();
+//    tree->GetValue(i, &results);
+//    EXPECT_EQ(results.size(), 1);
+//    EXPECT_EQ(results[0], i);
+//  }
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
+//  const int key_num = 55;
+//  std::vector<int64_t> results;
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  // Inserts the keys
+//  for (int i = 0; i < key_num; i++) {
+//    EXPECT_TRUE(tree->Insert(i, i));
+//  }
+//
+//  // The root node should have split
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 3);
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+//
+//  // Test Coalesce to left
+//  EXPECT_TRUE(tree->Delete(0, 0));
+//  EXPECT_TRUE(tree->Delete(50, 50));
+//
+//  EXPECT_EQ(tree->GetHeightOfTree(), 2);
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  // Ensure all values are present
+//  for (int i = 1; i < 55; i++) {
+//    if (i == 50) continue;
+//    results.clear();
+//    tree->GetValue(i, &results);
+//    EXPECT_EQ(results.size(), 1);
+//    EXPECT_EQ(results[0], i);
+//  }
+//
+//  delete tree;
+//}
+//
+//// NOLINTNEXTLINE
+//TEST_F(BPlusTreeTests, RootInnerToLeaf) {
+//  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+//
+//  auto *const tree = new BPlusTree<int64_t, int64_t>;
+//
+//  std::vector<int64_t> keys;
+//  keys.reserve(key_num);
+//
+//  for (int64_t i = 0; i < key_num; i++) {
+//    keys.emplace_back(i);
+//  }
+//
+//  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+//
+//  for (int i = 0; i < key_num; i++) {
+//    tree->Insert(keys[i], keys[i]);
+//  }
+//
+//  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
+//
+//  for (int i = 0; i < key_num - 1; i++) {
+//    tree->Delete(keys[i], keys[i]);
+//  }
+//
+//  EXPECT_TRUE(tree->GetRoot()->IsLeaf());
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
+//
+//  tree->Delete(keys[key_num - 1], keys[key_num - 1]);
+//
+//  EXPECT_EQ(tree->GetRoot()->GetSize(), 0);
+//}
+
 TEST_F(BPlusTreeTests, ScanAscendingRootSorted) {
   const int key_num = FAN_OUT - 1;
 
@@ -634,160 +1028,160 @@ TEST_F(BPlusTreeTests, ScanAscendingRootSorted) {
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingRootShuffled) {
-  const int key_num = FAN_OUT - 1;
+const int key_num = FAN_OUT - 1;
 
-  auto *const tree = new BPlusTree<int64_t, int64_t>;
+auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-  std::vector<int64_t> keys;
-  keys.reserve(key_num);
+std::vector<int64_t> keys;
+keys.reserve(key_num);
 
-  for (int64_t i = 0; i < key_num; i++) {
-    keys.emplace_back(i);
-  }
+for (int64_t i = 0; i < key_num; i++) {
+keys.emplace_back(i);
+}
 
-  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  for (int i = 0; i < key_num; i++) {
-    tree->Insert(keys[i], keys[i]);
-  }
+for (int i = 0; i < key_num; i++) {
+tree->Insert(keys[i], keys[i]);
+}
 
-  int i = 0;
-  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
-    EXPECT_EQ(it.first_, i);
-    EXPECT_EQ(it.second_, i);
-  }
+int i = 0;
+for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+EXPECT_EQ(it.first_, i);
+EXPECT_EQ(it.second_, i);
+}
 
-  EXPECT_EQ(i, key_num);
+EXPECT_EQ(i, key_num);
 
-  delete tree;
+delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingInsertTwoLevelShuffled) {
-  const int key_num = FAN_OUT;
+const int key_num = FAN_OUT;
 
-  auto *const tree = new BPlusTree<int64_t, int64_t>;
+auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-  std::vector<int64_t> keys;
-  keys.reserve(key_num);
+std::vector<int64_t> keys;
+keys.reserve(key_num);
 
-  for (int64_t i = 0; i < key_num; i++) {
-    keys.emplace_back(i);
-  }
+for (int64_t i = 0; i < key_num; i++) {
+keys.emplace_back(i);
+}
 
-  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  for (int i = 0; i < key_num; i++) {
-    tree->Insert(keys[i], keys[i]);
-  }
+for (int i = 0; i < key_num; i++) {
+tree->Insert(keys[i], keys[i]);
+}
 
-  int i = 0;
-  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
-    EXPECT_EQ(it.first_, i);
-    EXPECT_EQ(it.second_, i);
-  }
+int i = 0;
+for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+EXPECT_EQ(it.first_, i);
+EXPECT_EQ(it.second_, i);
+}
 
-  EXPECT_EQ(i, key_num);
+EXPECT_EQ(i, key_num);
 
-  delete tree;
+delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingInsertMultiLevelShuffled) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
-  auto *const tree = new BPlusTree<int64_t, int64_t>;
+auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-  std::vector<int64_t> keys;
-  keys.reserve(key_num);
+std::vector<int64_t> keys;
+keys.reserve(key_num);
 
-  for (int64_t i = 0; i < key_num; i++) {
-    keys.emplace_back(i);
-  }
+for (int64_t i = 0; i < key_num; i++) {
+keys.emplace_back(i);
+}
 
-  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  for (int i = 0; i < key_num; i++) {
-    tree->Insert(keys[i], keys[i]);
-  }
+for (int i = 0; i < key_num; i++) {
+tree->Insert(keys[i], keys[i]);
+}
 
-  int i = 0;
-  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
-    EXPECT_EQ(it.first_, i);
-    EXPECT_EQ(it.second_, i);
-  }
+int i = 0;
+for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+EXPECT_EQ(it.first_, i);
+EXPECT_EQ(it.second_, i);
+}
 
-  EXPECT_EQ(i, key_num);
+EXPECT_EQ(i, key_num);
 
-  delete tree;
+delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingDeleteTwoLevelShuffled) {
-  const int key_num = FAN_OUT;
+const int key_num = FAN_OUT;
 
-  auto *const tree = new BPlusTree<int64_t, int64_t>;
+auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-  std::vector<int64_t> keys;
-  keys.reserve(key_num);
+std::vector<int64_t> keys;
+keys.reserve(key_num);
 
-  for (int64_t i = 0; i < key_num; i++) {
-    keys.emplace_back(i);
-  }
+for (int64_t i = 0; i < key_num; i++) {
+keys.emplace_back(i);
+}
 
-  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  for (int i = 0; i < key_num; i++) {
-    tree->Insert(keys[i], keys[i]);
-  }
+for (int i = 0; i < key_num; i++) {
+tree->Insert(keys[i], keys[i]);
+}
 
-  for (int i = 0; i < (key_num + 1)/2; i++) {
-    EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
-  }
+for (int i = 0; i < (key_num + 1)/2; i++) {
+EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
+}
 
-  int i = 0;
-  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i);
+int i = 0;
+for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i);
 
-  EXPECT_EQ(i, key_num/2);
+EXPECT_EQ(i, key_num/2);
 
-  delete tree;
+delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
-  auto *const tree = new BPlusTree<int64_t, int64_t>;
+auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-  std::vector<std::pair<int64_t, int64_t> > keys;
-  keys.reserve(3 * key_num);
+std::vector<std::pair<int64_t, int64_t> > keys;
+keys.reserve(3 * key_num);
 
-  for (int64_t i = 0; i < key_num; i++) {
-    keys.emplace_back(std::make_pair(i, i + 1));
-    keys.emplace_back(std::make_pair(i, i + 2));
-    keys.emplace_back(std::make_pair(i, i + 3));
-  }
+for (int64_t i = 0; i < key_num; i++) {
+keys.emplace_back(std::make_pair(i, i + 1));
+keys.emplace_back(std::make_pair(i, i + 2));
+keys.emplace_back(std::make_pair(i, i + 3));
+}
 
-  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-  for (int i = 0; i < 3 * key_num; i++) {
-    tree->Insert(keys[i].first, keys[i].second);
-  }
+for (int i = 0; i < 3 * key_num; i++) {
+tree->Insert(keys[i].first, keys[i].second);
+}
 
-  for (int i = 0; i < 3 * key_num; i++) {
-    EXPECT_TRUE(tree->Delete(keys[i].first, keys[i].second));
+for (int i = 0; i < 3 * key_num; i++) {
+EXPECT_TRUE(tree->Delete(keys[i].first, keys[i].second));
 
-    std::vector<int64_t> results;
+std::vector<int64_t> results;
 
-    tree->GetValue(keys[i].first, &results);
+tree->GetValue(keys[i].first, &results);
 
-    for (auto it : results) {
-      EXPECT_FALSE(it == keys[i].second);
-    }
+for (auto it : results) {
+EXPECT_FALSE(it == keys[i].second);
+}
 
-    int j = 0;
-    for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++j);
+int j = 0;
+for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++j);
 
-    EXPECT_EQ(j, 3 * key_num - i - 1);
-  }
+EXPECT_EQ(j, 3 * key_num - i - 1);
+}
 
-  delete tree;
+delete tree;
 }
 
 }  // namespace terrier::storage::index
