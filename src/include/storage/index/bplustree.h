@@ -66,8 +66,7 @@ class BPlusTree {
   constexpr static const KeyComparator KEY_CMP_OBJ{};
   constexpr static const KeyEqualityChecker KEY_EQ_CHK{};
   constexpr static const ValueEqualityChecker VAL_EQ_CHK{};
-  // Global latch for the entire tree
-  mutable std::shared_mutex tree_lock_;
+
 
   /*
    * class Node - The base class for node types, i.e. InnerNode and LeafNode
@@ -902,6 +901,8 @@ class BPlusTree {
   }
 
  public:
+  // Global latch for the entire tree
+  mutable std::shared_mutex tree_lock_;
   BPlusTree() { root_ = nullptr; }
 
   // Returns the root of the B+ tree
