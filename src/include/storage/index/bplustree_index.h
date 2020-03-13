@@ -90,8 +90,7 @@ class BPlusTreeIndex final : public Index {
       // Register an abort action with the txn context in case of rollback
       txn->RegisterAbortAction([=]() {
         // Perform a delete from the underlying data structure of the key/value pair
-        const bool UNUSED_ATTRIBUTE result = true;
-//        const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
+        const bool UNUSED_ATTRIBUTE result = bplustree_->Delete(index_key, location);
         TERRIER_ASSERT(result, "Delete on the index failed.");
       });
     } else {
@@ -164,7 +163,6 @@ class BPlusTreeIndex final : public Index {
     if (low_key_exists) index_low_key.SetFromProjectedRow(*low_key, metadata_, num_attrs);
     if (high_key_exists) index_high_key.SetFromProjectedRow(*high_key, metadata_, num_attrs);
 
-    std::shared_lock lock(bplustree_->tree_lock_);
     // Perform lookup in BwTree
     auto scan_itr = low_key_exists ? bplustree_->Begin(index_low_key) : bplustree_->Begin();
 
@@ -186,7 +184,6 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    std::shared_lock lock(bplustree_->tree_lock_);
     // Perform lookup in BwTree
     auto scan_itr = bplustree_->End(index_high_key);
 
@@ -208,7 +205,6 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    std::shared_lock lock(bplustree_->tree_lock_);
     auto scan_itr = bplustree_->End(index_high_key);
 
     while (value_list->size() < limit && !(scan_itr == bplustree_->End()) &&

@@ -136,8 +136,7 @@ class BPlusTree {
       KeyValueSetPair entries_key = std::make_pair(key, dummy_set);
 
       auto it = std::lower_bound(entries_.begin(), entries_.end(), entries_key,
-          [](const auto &a, const auto &b)
-           { return KEY_CMP_OBJ(a.first, b.first); });
+                                 [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
       return (it - entries_.begin());
     }
@@ -162,8 +161,7 @@ class BPlusTree {
                                  [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
       // Not guarenteed that the key exists in the entries
-      if (it == entries_.end() || !KEY_EQ_CHK(it->first, key))
-        return entries_.end();
+      if (it == entries_.end() || !KEY_EQ_CHK(it->first, key)) return entries_.end();
 
       return it;
     }
@@ -204,8 +202,7 @@ class BPlusTree {
     bool HasKey(const KeyType &key) {
       auto it = GetPositionOfKey(key);
 
-      if (it == entries_.end())
-        return false;
+      if (it == entries_.end()) return false;
 
       return true;
     }
@@ -214,13 +211,11 @@ class BPlusTree {
     bool HasKeyValue(const KeyType &key, const ValueType &value) {
       auto it = GetPositionOfKey(key);
 
-      if (it == entries_.end())
-        return false;
+      if (it == entries_.end()) return false;
 
       auto loc = it->second.find(value);
 
-      if (loc != it->second.end())
-        return true;
+      if (loc != it->second.end()) return true;
 
       return false;
     }
@@ -267,7 +262,9 @@ class BPlusTree {
 
       new_node->SetNextPtr(next_ptr_);
       if (next_ptr_) {
+        next_ptr_->rw_latch.lock();
         next_ptr_->SetPrevPtr(new_node);
+        next_ptr_->rw_latch.unlock();
       }
 
       // Set the forward sibling pointer of the current node
@@ -410,7 +407,7 @@ class BPlusTree {
       auto it = std::upper_bound(entries_.begin(), entries_.end(), entries_key,
                                  [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return (int) (it - entries_.begin()) - 1;
+      return (int)(it - entries_.begin()) - 1;
     }
 
     // Returns size (number of keys) in the node
@@ -446,7 +443,7 @@ class BPlusTree {
     }
 
     // Returns the predecessor of the node that has the given key
-    Node *GetPredecessor(const KeyType &key) {
+    Node *GetPredecessor(const KeyType &key, std::deque<Node *> *locked_nodes) {
       int index = GetPositionLessThanEqualTo(key);
 
       // If your index is -1, you do not have a predecessor
@@ -458,17 +455,19 @@ class BPlusTree {
       // The predecessor is pointed to by prev_ptr_
       if (pred_index == -1) {
         // Get write lock
-//        prev_ptr_->rw_latch.lock();
+        prev_ptr_->rw_latch.lock();
+        locked_nodes->push_back(prev_ptr_);
         return prev_ptr_;
       }
 
       auto pred = entries_[pred_index].second;
-//      pred->rw_latch.lock();
+      pred->rw_latch.lock();
+      locked_nodes->push_back(pred);
       return pred;
     }
 
     // Returns the successor of the node that has the given key
-    Node *GetSuccessor(const KeyType &key) {
+    Node *GetSuccessor(const KeyType &key, std::deque<Node *> *locked_nodes) {
       int index = GetPositionLessThanEqualTo(key);
 
       uint64_t succ_index = index + 1;
@@ -477,7 +476,8 @@ class BPlusTree {
       if (succ_index == entries_.size()) return nullptr;
 
       auto successor = entries_[succ_index].second;
-//      successor->rw_latch.lock();
+      successor->rw_latch.lock();
+      locked_nodes->push_back(successor);
       return successor;
     }
 
@@ -765,7 +765,7 @@ class BPlusTree {
   // Traverse and find the leaf node that has the given key, populate the stack to store the path
   // When function returns, leaf node with write lock acquired is returned
   LeafNode *FindLeafNodeWrite(const KeyType &key, std::stack<InnerNode *> *node_traceback,
-      std::deque<Node *> *locked_nodes, bool is_delete) {
+                              std::deque<Node *> *locked_nodes, bool is_delete) {
     Node *node;
 
     root_latch_.lock();
@@ -813,7 +813,7 @@ class BPlusTree {
   // Insert a new (key, value) pair in the tree and rebalance the tree
   void InsertAndPropagate(const KeyType &key, const ValueType &value, LeafNode *insert_node,
                           std::stack<InnerNode *> *node_traceback) {
-//    TERRIER_ASSERT(!insert_node->rw_latch.try_lock(), "try_lock should fail because lock is already acquired");
+    //    TERRIER_ASSERT(!insert_node->rw_latch.try_lock(), "try_lock should fail because lock is already acquired");
     insert_node->Insert(key, value);
     // If insertion causes overflow
     if (insert_node->IsOverflow()) {
@@ -958,8 +958,8 @@ class BPlusTree {
   void Balance(LeafNode *node, std::stack<InnerNode *> *node_traceback, std::deque<Node *> *locked_nodes) {
     // Handle leaf merge separately
     auto parent_node = node_traceback->top();
-    auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey()));
-    auto right_sibling = dynamic_cast<LeafNode *>(parent_node->GetSuccessor(node->GetFirstKey()));
+    auto left_sibling = dynamic_cast<LeafNode *>(parent_node->GetPredecessor(node->GetFirstKey(), locked_nodes));
+    auto right_sibling = dynamic_cast<LeafNode *>(parent_node->GetSuccessor(node->GetFirstKey(), locked_nodes));
 
     // Borrow from siblings if possible
     if (left_sibling && !left_sibling->WillUnderflow()) {
@@ -988,6 +988,7 @@ class BPlusTree {
       if (right_sibling->GetNextPtr() != nullptr) {
         right_sibling->GetNextPtr()->SetPrevPtr(node);
       }
+      RemoveFromLockList(right_sibling, locked_nodes);
       delete right_sibling;
     }
 
@@ -1010,8 +1011,8 @@ class BPlusTree {
 
       parent_node = node_traceback->top();
       node_traceback->pop();
-      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(inner_node->GetFirstKey()));
-      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(inner_node->GetFirstKey()));
+      auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(inner_node->GetFirstKey(), locked_nodes));
+      auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(inner_node->GetFirstKey(), locked_nodes));
 
       if (left_inner && !left_inner->WillUnderflow()) {
         BorrowFromLeftInner(left_inner, inner_node, parent_node);
@@ -1031,6 +1032,7 @@ class BPlusTree {
         delete inner_node;
       } else {
         CoalesceInner(right_inner, inner_node, parent_node);
+        RemoveFromLockList(right_inner, locked_nodes);
         delete right_inner;
       }
 
@@ -1077,7 +1079,9 @@ class BPlusTree {
       insert_node->rw_latch.unlock();
       if (insert_node == root_) root_latch_.unlock();
 
-      while(!node_traceback.empty()) {node_traceback.pop();}
+      while (!node_traceback.empty()) {
+        node_traceback.pop();
+      }
 
       // A queue of nodes which contain write locks
       std::deque<Node *> locked_nodes;
@@ -1196,23 +1200,28 @@ class BPlusTree {
 
     if (!node->HasKeyValue(key, value)) {
       node->rw_latch.unlock();
+      if (node == root_) root_latch_.unlock();
       return false;
     }
 
     if (node == root_) {
       node->DeleteEntry(key, value);
       node->rw_latch.unlock();
+      root_latch_.unlock();
       // Do nothing as we allow the root to have 0 entries when it is a leaf node
       return true;
     }
 
-    // Must propagate
-    if (node->WillUnderflow()) {
+    if (!node->WillUnderflow()) {
+      // Delete and return
+      node->DeleteEntry(key, value);
+      node->rw_latch.unlock();
+      if (node == root_) root_latch_.unlock();
+    } else {
+      // Must propagate changes up
       // Release the lock
       node->rw_latch.unlock();
-
-      // Delete entry for leaf node
-      node->DeleteEntry(key, value);
+      if (node == root_) root_latch_.unlock();
 
       while (!node_traceback.empty()) {
         node_traceback.pop();
@@ -1221,6 +1230,9 @@ class BPlusTree {
       std::deque<Node *> locked_nodes;
 
       node = FindLeafNodeWrite(key, &node_traceback, &locked_nodes, true);
+
+      // Delete entry for leaf node
+      node->DeleteEntry(key, value);
 
       if (node == root_) {
         ReleaseNodeLocks(&locked_nodes);
@@ -1235,10 +1247,6 @@ class BPlusTree {
       }
 
       ReleaseNodeLocks(&locked_nodes);
-    } else {
-      // Delete entry for leaf node
-      node->DeleteEntry(key, value);
-      node->rw_latch.unlock();
     }
 
     return true;
