@@ -728,9 +728,7 @@ class BPlusTree {
       }
     }
 
-    void unlock() {
-      current_->rw_latch.unlock();
-    }
+    void unlock() { current_->rw_latch.unlock(); }
   };
 
   // Traverse and find the leaf node that has the given key, populate the stack to store the path
@@ -1317,7 +1315,7 @@ class BPlusTree {
       return End();
     }
 
-    auto pos = node->GetPositionToInsert(key);
+    size_t pos = node->GetPositionToInsert(key);
 
     if (node == root_) root_latch_.unlock();
 
@@ -1376,8 +1374,6 @@ class BPlusTree {
 
   bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) { return !KEY_CMP_OBJ(key1, key2); }
 
-  IndexIterator GetRetryIterator() {
-    return IndexIterator(nullptr, 1, 1);
-  }
+  IndexIterator GetRetryIterator() { return IndexIterator(nullptr, 1, 1); }
 };
 }  // namespace terrier::storage::index

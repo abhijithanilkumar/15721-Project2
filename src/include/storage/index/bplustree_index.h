@@ -178,7 +178,9 @@ class BPlusTreeIndex final : public Index {
       }
 
       if (!(scan_itr == retry)) {
-        if (!(scan_itr == bplustree_->End())) { scan_itr.unlock(); }
+        if (!(scan_itr == bplustree_->End())) {
+          scan_itr.unlock();
+        }
         break;
       }
     }
@@ -199,14 +201,17 @@ class BPlusTreeIndex final : public Index {
       // Perform lookup in BwTree
       auto scan_itr = bplustree_->End(index_high_key);
 
-      while (!(scan_itr == retry) && !(scan_itr == bplustree_->End()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
+      while (!(scan_itr == retry) && !(scan_itr == bplustree_->End()) &&
+             (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
         // Perform visibility check on result
         if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
         --scan_itr;
       }
 
       if (!(scan_itr == retry)) {
-        if (!(scan_itr == bplustree_->End())) { scan_itr.unlock(); }
+        if (!(scan_itr == bplustree_->End())) {
+          scan_itr.unlock();
+        }
         break;
       }
     }
@@ -236,7 +241,9 @@ class BPlusTreeIndex final : public Index {
       }
 
       if (!(scan_itr == retry)) {
-        if (!(scan_itr == bplustree_->End())) { scan_itr.unlock(); }
+        if (!(scan_itr == bplustree_->End())) {
+          scan_itr.unlock();
+        }
         break;
       }
     }

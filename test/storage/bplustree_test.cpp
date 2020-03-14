@@ -731,160 +731,162 @@ TEST_F(BPlusTreeTests, ScanAscendingRootSorted) {
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingRootShuffled) {
-const int key_num = FAN_OUT - 1;
+  const int key_num = FAN_OUT - 1;
 
-auto *const tree = new BPlusTree<int64_t, int64_t>;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-std::vector<int64_t> keys;
-keys.reserve(key_num);
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
 
-for (int64_t i = 0; i < key_num; i++) {
-keys.emplace_back(i);
-}
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
 
-std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-for (int i = 0; i < key_num; i++) {
-tree->Insert(keys[i], keys[i]);
-}
+  for (int i = 0; i < key_num; i++) {
+    tree->Insert(keys[i], keys[i]);
+  }
 
-int i = 0;
-for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
-EXPECT_EQ(it.first_, i);
-EXPECT_EQ(it.second_, i);
-}
+  int i = 0;
+  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+    EXPECT_EQ(it.first_, i);
+    EXPECT_EQ(it.second_, i);
+  }
 
-EXPECT_EQ(i, key_num);
+  EXPECT_EQ(i, key_num);
 
-delete tree;
+  delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingInsertTwoLevelShuffled) {
-const int key_num = FAN_OUT;
+  const int key_num = FAN_OUT;
 
-auto *const tree = new BPlusTree<int64_t, int64_t>;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-std::vector<int64_t> keys;
-keys.reserve(key_num);
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
 
-for (int64_t i = 0; i < key_num; i++) {
-keys.emplace_back(i);
-}
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
 
-std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-for (int i = 0; i < key_num; i++) {
-tree->Insert(keys[i], keys[i]);
-}
+  for (int i = 0; i < key_num; i++) {
+    tree->Insert(keys[i], keys[i]);
+  }
 
-int i = 0;
-for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
-EXPECT_EQ(it.first_, i);
-EXPECT_EQ(it.second_, i);
-}
+  int i = 0;
+  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+    EXPECT_EQ(it.first_, i);
+    EXPECT_EQ(it.second_, i);
+  }
 
-EXPECT_EQ(i, key_num);
+  EXPECT_EQ(i, key_num);
 
-delete tree;
+  delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingInsertMultiLevelShuffled) {
-const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
-auto *const tree = new BPlusTree<int64_t, int64_t>;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-std::vector<int64_t> keys;
-keys.reserve(key_num);
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
 
-for (int64_t i = 0; i < key_num; i++) {
-keys.emplace_back(i);
-}
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
 
-std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-for (int i = 0; i < key_num; i++) {
-tree->Insert(keys[i], keys[i]);
-}
+  for (int i = 0; i < key_num; i++) {
+    tree->Insert(keys[i], keys[i]);
+  }
 
-int i = 0;
-for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
-EXPECT_EQ(it.first_, i);
-EXPECT_EQ(it.second_, i);
-}
+  int i = 0;
+  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+    EXPECT_EQ(it.first_, i);
+    EXPECT_EQ(it.second_, i);
+  }
 
-EXPECT_EQ(i, key_num);
+  EXPECT_EQ(i, key_num);
 
-delete tree;
+  delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingDeleteTwoLevelShuffled) {
-const int key_num = FAN_OUT;
+  const int key_num = FAN_OUT;
 
-auto *const tree = new BPlusTree<int64_t, int64_t>;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-std::vector<int64_t> keys;
-keys.reserve(key_num);
+  std::vector<int64_t> keys;
+  keys.reserve(key_num);
 
-for (int64_t i = 0; i < key_num; i++) {
-keys.emplace_back(i);
-}
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(i);
+  }
 
-std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-for (int i = 0; i < key_num; i++) {
-tree->Insert(keys[i], keys[i]);
-}
+  for (int i = 0; i < key_num; i++) {
+    tree->Insert(keys[i], keys[i]);
+  }
 
-for (int i = 0; i < (key_num + 1)/2; i++) {
-EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
-}
+  for (int i = 0; i < (key_num + 1) / 2; i++) {
+    EXPECT_TRUE(tree->Delete(keys[i], keys[i]));
+  }
 
-int i = 0;
-for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i);
+  int i = 0;
+  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i)
+    ;
 
-EXPECT_EQ(i, key_num/2);
+  EXPECT_EQ(i, key_num / 2);
 
-delete tree;
+  delete tree;
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
-const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
-auto *const tree = new BPlusTree<int64_t, int64_t>;
+  auto *const tree = new BPlusTree<int64_t, int64_t>;
 
-std::vector<std::pair<int64_t, int64_t> > keys;
-keys.reserve(3 * key_num);
+  std::vector<std::pair<int64_t, int64_t> > keys;
+  keys.reserve(3 * key_num);
 
-for (int64_t i = 0; i < key_num; i++) {
-keys.emplace_back(std::make_pair(i, i + 1));
-keys.emplace_back(std::make_pair(i, i + 2));
-keys.emplace_back(std::make_pair(i, i + 3));
-}
+  for (int64_t i = 0; i < key_num; i++) {
+    keys.emplace_back(std::make_pair(i, i + 1));
+    keys.emplace_back(std::make_pair(i, i + 2));
+    keys.emplace_back(std::make_pair(i, i + 3));
+  }
 
-std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
+  std::shuffle(keys.begin(), keys.end(), std::mt19937{std::random_device{}()});  // NOLINT
 
-for (int i = 0; i < 3 * key_num; i++) {
-tree->Insert(keys[i].first, keys[i].second);
-}
+  for (int i = 0; i < 3 * key_num; i++) {
+    tree->Insert(keys[i].first, keys[i].second);
+  }
 
-for (int i = 0; i < 3 * key_num; i++) {
-EXPECT_TRUE(tree->Delete(keys[i].first, keys[i].second));
+  for (int i = 0; i < 3 * key_num; i++) {
+    EXPECT_TRUE(tree->Delete(keys[i].first, keys[i].second));
 
-std::vector<int64_t> results;
+    std::vector<int64_t> results;
 
-tree->GetValue(keys[i].first, &results);
+    tree->GetValue(keys[i].first, &results);
 
-for (auto it : results) {
-EXPECT_FALSE(it == keys[i].second);
-}
+    for (auto it : results) {
+      EXPECT_FALSE(it == keys[i].second);
+    }
 
-int j = 0;
-for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++j);
+    int j = 0;
+    for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++j)
+      ;
 
-EXPECT_EQ(j, 3 * key_num - i - 1);
-}
+    EXPECT_EQ(j, 3 * key_num - i - 1);
+  }
 
-delete tree;
+  delete tree;
 }
 
 }  // namespace terrier::storage::index
