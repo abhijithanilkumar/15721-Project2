@@ -646,6 +646,7 @@ class BPlusTree {
     }
 
     void operator++() {
+      // ++ won't make you go outside block
       if (key_offset_ < current_->GetSize() - 1) {
         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
           value_offset_++;
@@ -654,15 +655,29 @@ class BPlusTree {
           value_offset_ = 0;
         }
       } else {
+        // In last entry of block, if in last value as well
         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
           value_offset_++;
         } else {
+          // Have to move to the next leaf node
           TERRIER_ASSERT(current_ != nullptr, "The ++ operator should not be called for a null iterator");
-          current_ = current_->GetNextPtr();
+          auto new_current = current_->GetNextPtr();
+          if (new_current != nullptr) {
+            if (!new_current->rw_latch.try_lock_read()) {
+              current_->rw_latch.unlock();
+              current_ = nullptr;
+              key_offset_ = 1;
+              value_offset_ = 1;
+              return;
+            }
+          }
+          current_->rw_latch.unlock();
+          current_ = new_current;
           key_offset_ = 0;
           value_offset_ = 0;
         }
       }
+      // Update the entry corresponding to the iterator
       if (current_ != nullptr) {
         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
         first_ = key_val_iter->first;
@@ -671,6 +686,7 @@ class BPlusTree {
     }
 
     void operator--() {
+      // If -- stays within current node
       if (key_offset_ > 0) {
         if (value_offset_ > 0) {
           value_offset_--;
@@ -679,25 +695,41 @@ class BPlusTree {
           value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
         }
       } else {
+        // If -- stays within first key entry
         if (value_offset_ > 0) {
           value_offset_--;
         } else {
+          // If we have to move one node before
           TERRIER_ASSERT(current_ != nullptr, "The -- operator should not be called for a null iterator");
-          current_ = dynamic_cast<LeafNode *>(current_->GetPrevPtr());
-          if (current_ != nullptr) {
-            key_offset_ = current_->GetSize() - 1;
-            value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+          auto new_current = dynamic_cast<LeafNode *>(current_->GetPrevPtr());
+          if (new_current != nullptr) {
+            if (!new_current->rw_latch.try_lock_read()) {
+              current_->rw_latch.unlock();
+              current_ = nullptr;
+              key_offset_ = 1;
+              value_offset_ = 1;
+              return;
+            }
+            key_offset_ = new_current->GetSize() - 1;
+            value_offset_ = (new_current->GetEntriesBegin() + key_offset_)->second.size() - 1;
           } else {
             key_offset_ = 0;
             value_offset_ = 0;
           }
+          current_->rw_latch.unlock();
+          current_ = new_current;
         }
       }
+      // Calculate the corresponding entry for the iterator
       if (current_ != nullptr) {
         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
         first_ = key_val_iter->first;
         second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
       }
+    }
+
+    void unlock() {
+      current_->rw_latch.unlock();
     }
   };
 
@@ -1253,24 +1285,56 @@ class BPlusTree {
   }
 
   IndexIterator Begin() {
+    root_latch_.lock_read();
+    root_->rw_latch.lock_read();
     Node *node = root_;
-    if (node == nullptr) return End();
-    while (!node->IsLeaf()) {
-      node = node->GetPrevPtr();
+
+    if (node->GetSize() == 0) {
+      root_->rw_latch.unlock();
+      root_latch_.unlock();
+      return End();
     }
+
+    while (!node->IsLeaf()) {
+      auto child = node->GetPrevPtr();
+      child->rw_latch.lock_read();
+      node->rw_latch.unlock();
+      if (node == root_) root_latch_.unlock();
+      node = child;
+    }
+
+    if (node == root_) root_latch_.unlock();
+
     return IndexIterator(dynamic_cast<LeafNode *>(node), 0, 0);
   }
 
   IndexIterator Begin(const KeyType &key) {
     std::stack<InnerNode *> node_traceback;
     auto node = FindLeafNode(key, &node_traceback, false);
-    if (node->GetSize() == 0) return End();
+    if (node->GetSize() == 0) {
+      root_->rw_latch.unlock();
+      root_latch_.unlock();
+      return End();
+    }
+
     auto pos = node->GetPositionToInsert(key);
 
+    if (node == root_) root_latch_.unlock();
+
     if (pos >= node->GetSize()) {
-      node = node->GetNextPtr();
+      auto new_node = node->GetNextPtr();
+      if (new_node != nullptr) {
+        // Return retry iterator
+        if (!new_node->rw_latch.try_lock_read()) {
+          node->rw_latch.unlock();
+          return IndexIterator(nullptr, 1, 1);
+        }
+      }
+      node->rw_latch.unlock();
+      node = new_node;
       pos = 0;
     }
+
     return IndexIterator(node, pos, 0);
   }
 
@@ -1279,19 +1343,41 @@ class BPlusTree {
   IndexIterator End(const KeyType &key) {
     std::stack<InnerNode *> node_traceback;
     auto node = FindLeafNode(key, &node_traceback, false);
-    if (node->GetSize() == 0) return End();
+    if (node->GetSize() == 0) {
+      root_->rw_latch.unlock();
+      root_latch_.unlock();
+      return End();
+    }
+
     auto pos = node->GetPositionLessThanEqualTo(key);
+
+    // if root latch not released by FindLeafNode
+    if (node == root_) root_latch_.unlock();
+
+    // If value <= key not found in current node
     if (pos == -1) {
-      node = dynamic_cast<LeafNode *>(node->GetPrevPtr());
-      if (node == nullptr) {
-        return IndexIterator(node, 0, 0);
+      auto new_node = dynamic_cast<LeafNode *>(node->GetPrevPtr());
+      // rend reached
+      if (new_node == nullptr) {
+        node->rw_latch.unlock();
+        return End();
       }
-      pos = node->GetSize() - 1;
+      if (!new_node->rw_latch.try_lock_read()) {
+        node->rw_latch.unlock();
+        return IndexIterator(nullptr, 1, 1);
+      }
+      node->rw_latch.unlock();
+      node = new_node;
+      pos = new_node->GetSize() - 1;
     }
     int val_off = (node->GetEntriesEnd() - 1)->second.size() - 1;
     return IndexIterator(node, pos, val_off);
   }
 
   bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) { return !KEY_CMP_OBJ(key1, key2); }
+
+  IndexIterator GetRetryIterator() {
+    return IndexIterator(nullptr, 1, 1);
+  }
 };
 }  // namespace terrier::storage::index

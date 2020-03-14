@@ -163,15 +163,24 @@ class BPlusTreeIndex final : public Index {
     if (low_key_exists) index_low_key.SetFromProjectedRow(*low_key, metadata_, num_attrs);
     if (high_key_exists) index_high_key.SetFromProjectedRow(*high_key, metadata_, num_attrs);
 
-    // Perform lookup in BwTree
-    auto scan_itr = low_key_exists ? bplustree_->Begin(index_low_key) : bplustree_->Begin();
+    auto retry = bplustree_->GetRetryIterator();
 
-    // Limit of 0 indicates "no limit"
-    while ((limit == 0 || value_list->size() < limit) && !(scan_itr == bplustree_->End()) &&
-           (!high_key_exists || scan_itr.first_.PartialLessThan(index_high_key, &metadata_, num_attrs))) {
-      // Perform visibility check on result
-      if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
-      ++scan_itr;
+    while (true) {
+      // Perform lookup in BwTree
+      auto scan_itr = low_key_exists ? bplustree_->Begin(index_low_key) : bplustree_->Begin();
+
+      // Limit of 0 indicates "no limit"
+      while (!(scan_itr == retry) && (limit == 0 || value_list->size() < limit) && !(scan_itr == bplustree_->End()) &&
+             (!high_key_exists || scan_itr.first_.PartialLessThan(index_high_key, &metadata_, num_attrs))) {
+        // Perform visibility check on result
+        if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
+        ++scan_itr;
+      }
+
+      if (!(scan_itr == retry)) {
+        if (!(scan_itr == bplustree_->End())) { scan_itr.unlock(); }
+        break;
+      }
     }
   }
 
@@ -184,13 +193,22 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    // Perform lookup in BwTree
-    auto scan_itr = bplustree_->End(index_high_key);
+    auto retry = bplustree_->GetRetryIterator();
 
-    while (!(scan_itr == bplustree_->End()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
-      // Perform visibility check on result
-      if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
-      --scan_itr;
+    while (true) {
+      // Perform lookup in BwTree
+      auto scan_itr = bplustree_->End(index_high_key);
+
+      while (!(scan_itr == retry) && !(scan_itr == bplustree_->End()) && (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
+        // Perform visibility check on result
+        if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
+        --scan_itr;
+      }
+
+      if (!(scan_itr == retry)) {
+        if (!(scan_itr == bplustree_->End())) { scan_itr.unlock(); }
+        break;
+      }
     }
   }
 
@@ -205,13 +223,22 @@ class BPlusTreeIndex final : public Index {
     index_low_key.SetFromProjectedRow(low_key, metadata_, metadata_.GetSchema().GetColumns().size());
     index_high_key.SetFromProjectedRow(high_key, metadata_, metadata_.GetSchema().GetColumns().size());
 
-    auto scan_itr = bplustree_->End(index_high_key);
+    auto retry = bplustree_->GetRetryIterator();
 
-    while (value_list->size() < limit && !(scan_itr == bplustree_->End()) &&
-           (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
-      // Perform visibility check on result
-      if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
-      --scan_itr;
+    while (true) {
+      auto scan_itr = bplustree_->End(index_high_key);
+
+      while (!(scan_itr == retry) && value_list->size() < limit && !(scan_itr == bplustree_->End()) &&
+             (bplustree_->KeyCmpGreaterEqual(scan_itr.first_, index_low_key))) {
+        // Perform visibility check on result
+        if (IsVisible(txn, scan_itr.second_)) value_list->emplace_back(scan_itr.second_);
+        --scan_itr;
+      }
+
+      if (!(scan_itr == retry)) {
+        if (!(scan_itr == bplustree_->End())) { scan_itr.unlock(); }
+        break;
+      }
     }
   }
 };
