@@ -1731,7 +1731,7 @@ class BPlusTree {
 
       auto it = dynamic_cast<LeafNode *>(node)->GetEntriesBegin();
 
-      for (int i = 1; i < node->GetSize(); i++) {
+      for (size_t i = 1; i < node->GetSize(); i++) {
         // Check order of keys
         if ((it + i - 1)->first > (it + i)->first) {
           return false;
@@ -1754,7 +1754,7 @@ class BPlusTree {
 
       auto it = dynamic_cast<InnerNode *>(node)->GetEntriesBegin();
 
-      for (int i = 0; i < node->GetSize(); i++) {
+      for (size_t i = 0; i < node->GetSize(); i++) {
         if (i == 0) {
           // If there is atleast one key, prev ptr should exist
           if (node->GetPrevPtr() == nullptr || (node->GetPrevPtr()->GetLastKey() >= (it + i)->first)) {

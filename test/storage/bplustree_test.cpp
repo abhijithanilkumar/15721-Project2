@@ -656,7 +656,7 @@ TEST_F(BPlusTreeTests, RootInnerToLeaf) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, MultiThreadedDeleteTest) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
   std::vector<int64_t> keys;
