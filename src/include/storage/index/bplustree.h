@@ -617,6 +617,7 @@ class BPlusTree {
     LeafNode *current_;
     size_t key_offset_;
     size_t value_offset_;
+    typename std::unordered_set<ValueType>::iterator curr_itr_;
 
    public:
     KeyType first_;
@@ -629,7 +630,8 @@ class BPlusTree {
       if (current_ != nullptr) {
         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
         first_ = key_val_iter->first;
-        second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
+        curr_itr_ = std::next(key_val_iter->second.begin(), value_offset_);
+        second_ = *curr_itr_;
       }
     }
 
@@ -637,6 +639,7 @@ class BPlusTree {
       current_ = itr.current_;
       key_offset_ = itr.key_offset_;
       value_offset_ = itr.value_offset_;
+      curr_itr_ = itr.curr_itr_;
       first_ = itr.first_;
       second_ = itr.second_;
     }
@@ -650,14 +653,18 @@ class BPlusTree {
       if (key_offset_ < current_->GetSize() - 1) {
         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
           value_offset_++;
+          ++curr_itr_;
         } else {
           key_offset_++;
           value_offset_ = 0;
+          auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+          curr_itr_ = key_val_iter->second.begin();
         }
       } else {
         // In last entry of block, if in last value as well
         if (value_offset_ < (current_->GetEntriesBegin() + key_offset_)->second.size() - 1) {
           value_offset_++;
+          ++curr_itr_;
         } else {
           // Have to move to the next leaf node
           TERRIER_ASSERT(current_ != nullptr, "The ++ operator should not be called for a null iterator");
@@ -670,6 +677,8 @@ class BPlusTree {
               value_offset_ = 1;
               return;
             }
+            auto key_val_iter = new_current->GetEntriesBegin();
+            curr_itr_ = key_val_iter->second.begin();
           }
           current_->rw_latch.unlock();
           current_ = new_current;
@@ -681,7 +690,7 @@ class BPlusTree {
       if (current_ != nullptr) {
         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
         first_ = key_val_iter->first;
-        second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
+        second_ = *curr_itr_;
       }
     }
 
@@ -690,14 +699,18 @@ class BPlusTree {
       if (key_offset_ > 0) {
         if (value_offset_ > 0) {
           value_offset_--;
+          ++curr_itr_;
         } else {
           key_offset_--;
           value_offset_ = (current_->GetEntriesBegin() + key_offset_)->second.size() - 1;
+          auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
+          curr_itr_ = key_val_iter->second.begin();
         }
       } else {
         // If -- stays within first key entry
         if (value_offset_ > 0) {
           value_offset_--;
+          ++curr_itr_;
         } else {
           // If we have to move one node before
           TERRIER_ASSERT(current_ != nullptr, "The -- operator should not be called for a null iterator");
@@ -712,6 +725,8 @@ class BPlusTree {
             }
             key_offset_ = new_current->GetSize() - 1;
             value_offset_ = (new_current->GetEntriesBegin() + key_offset_)->second.size() - 1;
+            auto key_val_iter = new_current->GetEntriesBegin();
+            curr_itr_ = key_val_iter->second.begin();
           } else {
             key_offset_ = 0;
             value_offset_ = 0;
@@ -724,7 +739,7 @@ class BPlusTree {
       if (current_ != nullptr) {
         auto key_val_iter = (current_->GetEntriesBegin() + key_offset_);
         first_ = key_val_iter->first;
-        second_ = *(std::next(key_val_iter->second.begin(), value_offset_));
+        second_ = *curr_itr_;
       }
     }
 
@@ -1368,8 +1383,7 @@ class BPlusTree {
       node = new_node;
       pos = new_node->GetSize() - 1;
     }
-    int val_off = (node->GetEntriesEnd() - 1)->second.size() - 1;
-    return IndexIterator(node, pos, val_off);
+    return IndexIterator(node, pos, 0);
   }
 
   bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) { return !KEY_CMP_OBJ(key1, key2); }
