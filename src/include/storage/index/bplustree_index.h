@@ -179,7 +179,7 @@ class BPlusTreeIndex final : public Index {
 
       if (!(scan_itr == retry)) {
         if (!(scan_itr == bplustree_->End())) {
-          scan_itr.unlock();
+          scan_itr.Unlock();
         }
         break;
       }
@@ -210,7 +210,7 @@ class BPlusTreeIndex final : public Index {
 
       if (!(scan_itr == retry)) {
         if (!(scan_itr == bplustree_->End())) {
-          scan_itr.unlock();
+          scan_itr.Unlock();
         }
         break;
       }
@@ -242,7 +242,7 @@ class BPlusTreeIndex final : public Index {
 
       if (!(scan_itr == retry)) {
         if (!(scan_itr == bplustree_->End())) {
-          scan_itr.unlock();
+          scan_itr.Unlock();
         }
         break;
       }

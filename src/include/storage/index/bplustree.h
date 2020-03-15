@@ -125,7 +125,7 @@ class BPlusTree {
   class Node {
    public:
     // Read-write latch present in the node
-    tbb::spin_rw_mutex rw_latch;
+    tbb::spin_rw_mutex rw_latch_;
 
     /*
      * Constructor for the node (default one)
@@ -169,7 +169,6 @@ class BPlusTree {
    */
   class LeafNode : public Node {
    private:
-
     // Each key has a set of values stored as an unordered set
     std::vector<KeyValueSetPair> entries_;
     // Sibling pointers
@@ -222,7 +221,7 @@ class BPlusTree {
       auto it = std::upper_bound(entries_.begin(), entries_.end(), entries_key,
                                  [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return (int)(it - entries_.begin()) - 1;
+      return static_cast<int>(it - entries_.begin()) - 1;
     }
 
     /*
@@ -274,12 +273,7 @@ class BPlusTree {
     /*
      * Check if a node will overflow after an insertion
      */
-    bool WillOverflow() override {
-      if (entries_.size() == (FAN_OUT - 1)) {
-        return true;
-      }
-      return false;
-    }
+    bool WillOverflow() override { return (entries_.size() == (FAN_OUT - 1)); }
 
     /*
      * Inputs - the pointer to the node which is to be pointed to by prev_ptr
@@ -294,9 +288,7 @@ class BPlusTree {
     bool HasKey(const KeyType &key) {
       auto it = GetPositionOfKey(key);
 
-      if (it == entries_.end()) return false;
-
-      return true;
+      return !(it == entries_.end());
     }
 
     /*
@@ -310,9 +302,7 @@ class BPlusTree {
 
       auto loc = it->second.find(value);
 
-      if (loc != it->second.end()) return true;
-
-      return false;
+      return (loc != it->second.end());
     }
 
     /*
@@ -373,9 +363,9 @@ class BPlusTree {
 
       new_node->SetNextPtr(next_ptr_);
       if (next_ptr_) {
-        next_ptr_->rw_latch.lock();
+        next_ptr_->rw_latch_.lock();
         next_ptr_->SetPrevPtr(new_node);
-        next_ptr_->rw_latch.unlock();
+        next_ptr_->rw_latch_.unlock();
       }
 
       // Set the forward sibling pointer of the current node
@@ -566,7 +556,7 @@ class BPlusTree {
       auto it = std::upper_bound(entries_.begin(), entries_.end(), entries_key,
                                  [](const auto &a, const auto &b) { return KEY_CMP_OBJ(a.first, b.first); });
 
-      return (int)(it - entries_.begin()) - 1;
+      return static_cast<int>(it - entries_.begin()) - 1;
     }
 
     /*
@@ -606,12 +596,7 @@ class BPlusTree {
      * Check if the given node will overflow assuming insertion
      * Assumption: Used for borrowing, only looks at no. of keys
      */
-    bool WillOverflow() override {
-      if (entries_.size() == (FAN_OUT - 1)) {
-        return true;
-      }
-      return false;
-    }
+    bool WillOverflow() override { return (entries_.size() == (FAN_OUT - 1)); }
 
     /*
      * Inputs - key, *locked_nodes
@@ -630,13 +615,13 @@ class BPlusTree {
       // The predecessor is pointed to by prev_ptr_
       if (pred_index == -1) {
         // Get write lock
-        prev_ptr_->rw_latch.lock();
+        prev_ptr_->rw_latch_.lock();
         locked_nodes->push_back(prev_ptr_);
         return prev_ptr_;
       }
 
       auto pred = entries_[pred_index].second;
-      pred->rw_latch.lock();
+      pred->rw_latch_.lock();
       locked_nodes->push_back(pred);
       return pred;
     }
@@ -655,7 +640,7 @@ class BPlusTree {
       if (succ_index == entries_.size()) return nullptr;
 
       auto successor = entries_[succ_index].second;
-      successor->rw_latch.lock();
+      successor->rw_latch_.lock();
       locked_nodes->push_back(successor);
       return successor;
     }
@@ -745,11 +730,9 @@ class BPlusTree {
     typename std::vector<KeyNodePtrPair>::iterator GetKeyNodePtrPair(const KeyType &key) {
       int pos = GetPositionLessThanEqualTo(key);
 
-      if (pos == -1)
-        return entries_.end() - 1;
+      if (pos == -1) return entries_.end() - 1;
 
-      else
-        return entries_.begin() + pos;
+      return entries_.begin() + pos;
     }
 
     /*
@@ -911,8 +894,8 @@ class BPlusTree {
           auto new_current = current_->GetNextPtr();
           if (new_current != nullptr) {
             // Make scan retry if latch not acquired
-            if (!new_current->rw_latch.try_lock_read()) {
-              current_->rw_latch.unlock();
+            if (!new_current->rw_latch_.try_lock_read()) {
+              current_->rw_latch_.unlock();
               current_ = nullptr;
               key_offset_ = 1;
               value_offset_ = 1;
@@ -920,7 +903,7 @@ class BPlusTree {
             }
           }
           // Move to next node
-          current_->rw_latch.unlock();
+          current_->rw_latch_.unlock();
           current_ = new_current;
           key_offset_ = 0;
           value_offset_ = 0;
@@ -957,8 +940,8 @@ class BPlusTree {
           auto new_current = dynamic_cast<LeafNode *>(current_->GetPrevPtr());
           if (new_current != nullptr) {
             // Make scan retry if latch not acquired
-            if (!new_current->rw_latch.try_lock_read()) {
-              current_->rw_latch.unlock();
+            if (!new_current->rw_latch_.try_lock_read()) {
+              current_->rw_latch_.unlock();
               current_ = nullptr;
               key_offset_ = 1;
               value_offset_ = 1;
@@ -972,7 +955,7 @@ class BPlusTree {
             value_offset_ = 0;
           }
           // Move to previous node
-          current_->rw_latch.unlock();
+          current_->rw_latch_.unlock();
           current_ = new_current;
         }
       }
@@ -988,7 +971,7 @@ class BPlusTree {
      * Unlocks latch on the current node
      * Used in limit scans
      */
-    void unlock() { current_->rw_latch.unlock(); }
+    void Unlock() { current_->rw_latch_.unlock(); }
   };
 
   /*
@@ -1004,10 +987,10 @@ class BPlusTree {
     // Spin to get the latch on the root (root might be updatesd over iterations)
     if (write_lock_leaf) {
       root_latch_.lock();
-      root_->rw_latch.lock();
+      root_->rw_latch_.lock();
     } else {
       root_latch_.lock_read();
-      root_->rw_latch.lock_read();
+      root_->rw_latch_.lock_read();
     }
     node = root_;
 
@@ -1016,13 +999,13 @@ class BPlusTree {
 
       // Acquire read lock for the node
       if (inner_node != root_) {
-        inner_node->rw_latch.lock_read();
+        inner_node->rw_latch_.lock_read();
       }
 
       // If parent exists, release read lock
       if (!node_traceback->empty()) {
         auto parent = node_traceback->top();
-        parent->rw_latch.unlock();
+        parent->rw_latch_.unlock();
         if (parent == root_) root_latch_.unlock();
       }
 
@@ -1036,16 +1019,16 @@ class BPlusTree {
     if (node != root_) {
       if (write_lock_leaf) {
         // Get write lock for leaf
-        node->rw_latch.lock();
+        node->rw_latch_.lock();
       } else {
-        node->rw_latch.lock_read();
+        node->rw_latch_.lock_read();
       }
     }
 
     // If parent exists, release read lock
     if (!node_traceback->empty()) {
       auto parent = node_traceback->top();
-      parent->rw_latch.unlock();
+      parent->rw_latch_.unlock();
       if (parent == root_) root_latch_.unlock();
     }
 
@@ -1074,7 +1057,7 @@ class BPlusTree {
 
     // Acquire both root latches
     root_latch_.lock();
-    root_->rw_latch.lock();
+    root_->rw_latch_.lock();
     node = root_;
 
     while (!node->IsLeaf()) {
@@ -1082,7 +1065,7 @@ class BPlusTree {
 
       // Acquire read lock for the node
       if (inner_node != root_) {
-        inner_node->rw_latch.lock();
+        inner_node->rw_latch_.lock();
       }
 
       // If parent exists, release read lock
@@ -1102,7 +1085,7 @@ class BPlusTree {
 
     if (node != root_) {
       // Get write lock for leaf
-      node->rw_latch.lock();
+      node->rw_latch_.lock();
     }
 
     // If parent exists, release locks
@@ -1246,6 +1229,7 @@ class BPlusTree {
    * Coalesce from src to dst (right to left)
    */
   void CoalesceLeaf(LeafNode *src, LeafNode *dst, InnerNode *parent) {
+    TERRIER_ASSERT(src != nullptr, "source is non null");
     // Both src and dst of same level
 
     // Deletes the entry pointing to src node
@@ -1260,6 +1244,7 @@ class BPlusTree {
    * Coalesce from source to destination (right to left)
    */
   void CoalesceInner(InnerNode *src, InnerNode *dst, InnerNode *parent) {
+    TERRIER_ASSERT(src != nullptr, "source is non null");
     // Both src and dst of same level
     // Deletes the entry pointing to src node
     KeyType parent_key = parent->DeleteEntry(src->GetFirstKey());
@@ -1277,7 +1262,7 @@ class BPlusTree {
   void RemoveFromLockList(Node *node, std::deque<Node *> *locked_nodes) {
     for (auto it = locked_nodes->begin(); it != locked_nodes->end(); ++it) {
       if (*it == node) {
-        (*it)->rw_latch.unlock();
+        (*it)->rw_latch_.unlock();
         if (*it == root_) {
           root_latch_.unlock();
         }
@@ -1351,18 +1336,18 @@ class BPlusTree {
       auto left_inner = dynamic_cast<InnerNode *>(parent_node->GetPredecessor(inner_node->GetFirstKey(), locked_nodes));
       auto right_inner = dynamic_cast<InnerNode *>(parent_node->GetSuccessor(inner_node->GetFirstKey(), locked_nodes));
 
-      if (left_inner && !left_inner->WillUnderflow()) {
+      if ((left_inner != nullptr) && !left_inner->WillUnderflow()) {
         BorrowFromLeftInner(left_inner, inner_node, parent_node);
         return;
       }
-      if (right_inner && !right_inner->WillUnderflow()) {
+      if ((right_inner != nullptr) && !right_inner->WillUnderflow()) {
         BorrowFromRightInner(right_inner, inner_node, parent_node);
         return;
       }
 
       // Try Coalesce
       // Parent node entry for child is also deleted
-      if (left_inner) {
+      if (left_inner != nullptr) {
         CoalesceInner(inner_node, left_inner, parent_node);
         // Remove from list of nodes with active lock
         RemoveFromLockList(inner_node, locked_nodes);
@@ -1378,7 +1363,6 @@ class BPlusTree {
   }
 
  public:
-
   /*
    * Constructor for B+ tree
    * Root is never nullptr. Starts off as empty leaf node.
@@ -1399,7 +1383,7 @@ class BPlusTree {
     while (!locked_nodes->empty()) {
       auto node = locked_nodes->front();
       locked_nodes->pop_front();
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       if (node == root_) root_latch_.unlock();
     }
   }
@@ -1416,18 +1400,18 @@ class BPlusTree {
 
     // If there were conflicting key values
     if (insert_node->HasKeyValue(key, value) || (unique_key && insert_node->HasKey(key))) {
-      insert_node->rw_latch.unlock();
+      insert_node->rw_latch_.unlock();
       if (insert_node == root_) root_latch_.unlock();
       return false;  // The traverse function aborts the insert as key, val is present
     }
 
     if (!insert_node->WillOverflow()) {
       InsertAndPropagate(key, value, insert_node, &node_traceback);
-      insert_node->rw_latch.unlock();
+      insert_node->rw_latch_.unlock();
       if (insert_node == root_) root_latch_.unlock();
     } else {
       // Release write lock aquired while finding
-      insert_node->rw_latch.unlock();
+      insert_node->rw_latch_.unlock();
       if (insert_node == root_) root_latch_.unlock();
 
       while (!node_traceback.empty()) {
@@ -1466,7 +1450,7 @@ class BPlusTree {
 
     // If there were conflicting key values
     if (insert_node->SatisfiesPredicate(key, predicate)) {
-      insert_node->rw_latch.unlock();
+      insert_node->rw_latch_.unlock();
       if (insert_node == root_) root_latch_.unlock();
       *predicate_satisfied = true;
       return false;  // The traverse function aborts the insert as key, val is present
@@ -1476,11 +1460,11 @@ class BPlusTree {
 
     if (!insert_node->WillOverflow()) {
       InsertAndPropagate(key, value, insert_node, &node_traceback);
-      insert_node->rw_latch.unlock();
+      insert_node->rw_latch_.unlock();
       if (insert_node == root_) root_latch_.unlock();
     } else {
       // Release write lock aquired
-      insert_node->rw_latch.unlock();
+      insert_node->rw_latch_.unlock();
       if (insert_node == root_) root_latch_.unlock();
 
       // Redo the search by acquiring write locks
@@ -1522,7 +1506,7 @@ class BPlusTree {
     node->ScanAndPopulateResults(key, results);
 
     // Release read lock
-    node->rw_latch.unlock();
+    node->rw_latch_.unlock();
     if (node == root_) root_latch_.unlock();
   }
 
@@ -1563,14 +1547,14 @@ class BPlusTree {
     auto node = FindLeafNode(key, &node_traceback, true);
 
     if (!node->HasKeyValue(key, value)) {
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       if (node == root_) root_latch_.unlock();
       return false;
     }
 
     if (node == root_) {
       node->DeleteEntry(key, value);
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       root_latch_.unlock();
       // Do nothing as we allow the root to have 0 entries when it is a leaf node
       return true;
@@ -1579,12 +1563,12 @@ class BPlusTree {
     if (!node->WillUnderflow()) {
       // Delete and return
       node->DeleteEntry(key, value);
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       if (node == root_) root_latch_.unlock();
     } else {
       // Must propagate changes up
       // Release the lock
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       if (node == root_) root_latch_.unlock();
 
       while (!node_traceback.empty()) {
@@ -1621,12 +1605,12 @@ class BPlusTree {
    */
   IndexIterator Begin() {
     root_latch_.lock_read();
-    root_->rw_latch.lock_read();
+    root_->rw_latch_.lock_read();
     Node *node = root_;
 
     // If root is empty
     if (node->GetSize() == 0) {
-      root_->rw_latch.unlock();
+      root_->rw_latch_.unlock();
       root_latch_.unlock();
       return End();
     }
@@ -1634,8 +1618,8 @@ class BPlusTree {
     // Find leaf node
     while (!node->IsLeaf()) {
       auto child = node->GetPrevPtr();
-      child->rw_latch.lock_read();
-      node->rw_latch.unlock();
+      child->rw_latch_.lock_read();
+      node->rw_latch_.unlock();
       if (node == root_) root_latch_.unlock();
       node = child;
     }
@@ -1654,7 +1638,7 @@ class BPlusTree {
     std::stack<InnerNode *> node_traceback;
     auto node = FindLeafNode(key, &node_traceback, false);
     if (node->GetSize() == 0) {
-      root_->rw_latch.unlock();
+      root_->rw_latch_.unlock();
       root_latch_.unlock();
       return End();
     }
@@ -1667,12 +1651,12 @@ class BPlusTree {
       auto new_node = node->GetNextPtr();
       if (new_node != nullptr) {
         // Return retry iterator
-        if (!new_node->rw_latch.try_lock_read()) {
-          node->rw_latch.unlock();
+        if (!new_node->rw_latch_.try_lock_read()) {
+          node->rw_latch_.unlock();
           return IndexIterator(nullptr, 1, 1);
         }
       }
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       node = new_node;
       pos = 0;
     }
@@ -1693,7 +1677,7 @@ class BPlusTree {
     std::stack<InnerNode *> node_traceback;
     auto node = FindLeafNode(key, &node_traceback, false);
     if (node->GetSize() == 0) {
-      root_->rw_latch.unlock();
+      root_->rw_latch_.unlock();
       root_latch_.unlock();
       return End();
     }
@@ -1708,14 +1692,14 @@ class BPlusTree {
       auto new_node = dynamic_cast<LeafNode *>(node->GetPrevPtr());
       // rend reached
       if (new_node == nullptr) {
-        node->rw_latch.unlock();
+        node->rw_latch_.unlock();
         return End();
       }
-      if (!new_node->rw_latch.try_lock_read()) {
-        node->rw_latch.unlock();
+      if (!new_node->rw_latch_.try_lock_read()) {
+        node->rw_latch_.unlock();
         return IndexIterator(nullptr, 1, 1);
       }
-      node->rw_latch.unlock();
+      node->rw_latch_.unlock();
       node = new_node;
       pos = new_node->GetSize() - 1;
     }
@@ -1734,7 +1718,7 @@ class BPlusTree {
    */
   IndexIterator GetRetryIterator() { return IndexIterator(nullptr, 1, 1); }
 
-  bool checkStructuralIntegrityHelper(Node* node, size_t height_from_root) {
+  bool CheckStructuralIntegrityHelper(Node *node, size_t height_from_root) {
     if (node->IsLeaf()) {
       if (node != root_ && node->GetSize() < MIN_KEYS_LEAF_NODE) {
         return false;
@@ -1745,19 +1729,18 @@ class BPlusTree {
         return false;
       }
 
-      auto it = dynamic_cast<LeafNode*>(node)->GetEntriesBegin();
+      auto it = dynamic_cast<LeafNode *>(node)->GetEntriesBegin();
 
       for (int i = 1; i < node->GetSize(); i++) {
+        // Check order of keys
+        if ((it + i - 1)->first > (it + i)->first) {
+          return false;
+        }
 
-          // Check order of keys
-          if ((it + i - 1)->first > (it + i)->first) {
-            return false;
-          }
-
-          // Ensure keys have at least one value
-          if ((it + i)->second.size() == 0) {
-            return false;
-          }
+        // Ensure keys have at least one value
+        if ((it + i)->second.empty()) {
+          return false;
+        }
       }
     } else {
       if (node != root_ && node->GetSize() < MIN_KEYS_INNER_NODE) {
@@ -1774,9 +1757,7 @@ class BPlusTree {
       for (int i = 0; i < node->GetSize(); i++) {
         if (i == 0) {
           // If there is atleast one key, prev ptr should exist
-          if (node->GetPrevPtr() == nullptr) {
-            return false;
-          } else if (node->GetPrevPtr()->GetLastKey() >= (it+i)->first) {
+          if (node->GetPrevPtr() == nullptr || (node->GetPrevPtr()->GetLastKey() >= (it + i)->first)) {
             return false;
           }
           continue;
@@ -1793,13 +1774,13 @@ class BPlusTree {
         }
 
         // Recursive function call for all children of inner node
-        if (!checkStructuralIntegrityHelper((it+i)->second, height_from_root - 1)) {
+        if (!CheckStructuralIntegrityHelper((it + i)->second, height_from_root - 1)) {
           return false;
         }
 
         // Check the key limits of child node
-        if ((it+i-1)->first > (it+i-1)->second->GetFirstKey() &&
-            (it+i)->first <= (it + i - 1)->second->GetFirstKey()) {
+        if ((it + i - 1)->first > (it + i - 1)->second->GetFirstKey() &&
+            (it + i)->first <= (it + i - 1)->second->GetFirstKey()) {
           return false;
         }
 
@@ -1815,7 +1796,6 @@ class BPlusTree {
     return true;
   }
 
-
   /*
    * checkStructuralIntegrity: Function to check the structural integrity for the tree
    * 1) Checks the limit for number of keys in the inner and leaf nodes
@@ -1824,12 +1804,11 @@ class BPlusTree {
    * 4) Checks that all pointers in the inner node are non-NULL
    * 5) Checks that the keys in a child node are within the range specified by the parent nodes
    */
-  bool checkStructuralIntegrity() {
+  bool CheckStructuralIntegrity() {
     if (root_->GetSize() != 0) {
-      return checkStructuralIntegrityHelper(root_, GetHeightOfTree() - 1);
-    } else {
-      return true;
+      return CheckStructuralIntegrityHelper(root_, GetHeightOfTree() - 1);
     }
+    return true;
   }
 };
 }  // namespace terrier::storage::index
