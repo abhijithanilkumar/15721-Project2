@@ -852,6 +852,7 @@ TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
   const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
+  EXPECT_TRUE(tree->checkStructuralIntegrity());
 
   std::vector<std::pair<int64_t, int64_t> > keys;
   keys.reserve(3 * key_num);
@@ -866,6 +867,7 @@ TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
 
   for (int i = 0; i < 3 * key_num; i++) {
     tree->Insert(keys[i].first, keys[i].second);
+    EXPECT_TRUE(tree->checkStructuralIntegrity());
   }
 
   for (int i = 0; i < 3 * key_num; i++) {
@@ -884,6 +886,7 @@ TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
       ;
 
     EXPECT_EQ(j, 3 * key_num - i - 1);
+    EXPECT_TRUE(tree->checkStructuralIntegrity());
   }
 
   delete tree;

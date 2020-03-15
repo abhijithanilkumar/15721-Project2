@@ -92,6 +92,7 @@ class BPlusTree {
     virtual size_t GetHeapSpaceSubtree() = 0;
     virtual Node *GetPrevPtr() = 0;
     virtual KeyType GetFirstKey() = 0;
+    virtual KeyType GetLastKey() = 0;
     virtual void Append(Node *node) = 0;
     virtual bool WillOverflow() = 0;
     virtual bool WillUnderflow() = 0;
@@ -249,6 +250,9 @@ class BPlusTree {
 
     // Returns the first key in the leaf node
     KeyType GetFirstKey() override { return entries_[0].first; }
+
+    // Returns the last key in the leaf node
+    KeyType GetLastKey() override { return entries_.rbegin()->first; }
 
     // Split the node into two, return the new node and set sibling pointers
     Node *Split() override {
@@ -580,6 +584,8 @@ class BPlusTree {
 
     // Get the first key in the node
     KeyType GetFirstKey() override { return entries_[0].first; }
+
+    KeyType GetLastKey() override { return entries_.rbegin()->first; }
 
     // Replace the key that points to the old_key with new_key
     KeyType ReplaceKey(const KeyType &old_key, const KeyType &new_key) {
@@ -1375,5 +1381,103 @@ class BPlusTree {
   bool KeyCmpGreaterEqual(const KeyType &key1, const KeyType &key2) { return !KEY_CMP_OBJ(key1, key2); }
 
   IndexIterator GetRetryIterator() { return IndexIterator(nullptr, 1, 1); }
+
+  bool checkStructuralIntegrityHelper(Node* node, size_t height_from_root) {
+    if (node->IsLeaf()) {
+      if (node != root_ && node->GetSize() < MIN_KEYS_LEAF_NODE) {
+        return false;
+      }
+
+      // All leaf nodes must be at the same level
+      if (height_from_root != 0) {
+        return false;
+      }
+
+      auto it = dynamic_cast<LeafNode*>(node)->GetEntriesBegin();
+
+      for (int i = 1; i < node->GetSize(); i++) {
+
+          // Check order of keys
+          if ((it + i - 1)->first > (it + i)->first) {
+            return false;
+          }
+
+          // Ensure keys have at least one value
+          if ((it + i)->second.size() == 0) {
+            return false;
+          }
+      }
+    } else {
+      if (node != root_ && node->GetSize() < MIN_KEYS_INNER_NODE) {
+        return false;
+      }
+
+      // Root must have at least one key if it is not the leaf node
+      if (node == root_ && node->GetSize() == 0) {
+        return false;
+      }
+
+      auto it = dynamic_cast<InnerNode *>(node)->GetEntriesBegin();
+
+      for (int i = 0; i < node->GetSize(); i++) {
+        if (i == 0) {
+          // If there is atleast one key, prev ptr should exist
+          if (node->GetPrevPtr() == nullptr) {
+            return false;
+          } else if (node->GetPrevPtr()->GetLastKey() >= (it+i)->first) {
+            return false;
+          }
+          continue;
+        }
+
+        // Check order of keys
+        if ((it + i - 1)->first > (it + i)->first) {
+          return false;
+        }
+
+        // Ensures that each key has a non-NULL associated pointer
+        if ((it + i)->second == nullptr) {
+          return false;
+        }
+
+        // Recursive function call for all children of inner node
+        if (!checkStructuralIntegrityHelper((it+i)->second, height_from_root - 1)) {
+          return false;
+        }
+
+        // Check the key limits of child node
+        if ((it+i-1)->first > (it+i-1)->second->GetFirstKey() &&
+            (it+i)->first <= (it + i - 1)->second->GetFirstKey()) {
+          return false;
+        }
+
+        // Check the last pointer
+        if (i == node->GetSize() - 1) {
+          if ((it + i)->first > (it + i)->second->GetFirstKey()) {
+            return false;
+          }
+        }
+      }
+    }
+
+    return true;
+  }
+
+
+  /*
+   * checkStructuralIntegrity: Function to check the structural integrity for the tree
+   * 1) Checks the limit for number of keys in the inner and leaf nodes
+   * 2) Checks the keys stored in a node are in the ascending order
+   * 3) Checks that all leaf nodes are at the same level
+   * 4) Checks that all pointers in the inner node are non-NULL
+   * 5) Checks that the keys in a child node are within the range specified by the parent nodes
+   */
+  bool checkStructuralIntegrity() {
+    if (root_->GetSize() != 0) {
+      return checkStructuralIntegrityHelper(root_, GetHeightOfTree() - 1);
+    } else {
+      return true;
+    }
+  }
 };
 }  // namespace terrier::storage::index
