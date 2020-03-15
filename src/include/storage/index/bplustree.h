@@ -1273,6 +1273,19 @@ class BPlusTree {
   }
 
   /*
+   * Inputs - locked_nodes
+   * Checks if the root of the tree is present in the locked_nodes queue
+   */
+  bool IsRootPresent(std::deque<Node *> *locked_nodes) {
+    for (auto it = locked_nodes->begin(); it != locked_nodes->end(); ++it) {
+      if (*it == root_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /*
    * Inputs - node, node_traceback, locked_nodes
    * Balance a tree on deletion at leaf node (node) using the node_traceback stack and release locks from
    * locked_nodes as and when required
@@ -1303,6 +1316,7 @@ class BPlusTree {
       }
       // Remove from list of nodes with active lock
       RemoveFromLockList(node, locked_nodes);
+      RemoveFromLockList(left_sibling, locked_nodes);
       delete node;
     } else {
       CoalesceLeaf(right_sibling, node, parent_node);
@@ -1311,6 +1325,7 @@ class BPlusTree {
         right_sibling->GetNextPtr()->SetPrevPtr(node);
       }
       RemoveFromLockList(right_sibling, locked_nodes);
+      RemoveFromLockList(node, locked_nodes);
       delete right_sibling;
     }
 
@@ -1325,6 +1340,11 @@ class BPlusTree {
           // Only 1 pointer left in the root
           auto tmp = root_;
           root_ = root_->GetPrevPtr();
+          // Check if the new root must be locked again
+          if (!IsRootPresent(locked_nodes)) {
+            root_->rw_latch_.lock();
+            locked_nodes->push_back(root_);
+          }
           RemoveFromLockList(tmp, locked_nodes);
           delete tmp;
         }
