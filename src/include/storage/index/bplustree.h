@@ -1232,6 +1232,7 @@ class BPlusTree {
     // Both src and dst of same level
 
     // Deletes the entry pointing to src node
+    if (src == nullptr) return;
     parent->DeleteEntry(src->GetFirstKey());
 
     // Copy entries
@@ -1246,6 +1247,7 @@ class BPlusTree {
     TERRIER_ASSERT(src != nullptr, "source is non null");
     // Both src and dst of same level
     // Deletes the entry pointing to src node
+    if (src == nullptr) return;
     KeyType parent_key = parent->DeleteEntry(src->GetFirstKey());
 
     dst->Insert(parent_key, src->GetPrevPtr());
@@ -1317,7 +1319,7 @@ class BPlusTree {
       RemoveFromLockList(node, locked_nodes);
       RemoveFromLockList(left_sibling, locked_nodes);
       delete node;
-    } else {
+    } else if (right_sibling) {
       CoalesceLeaf(right_sibling, node, parent_node);
       node->SetNextPtr(right_sibling->GetNextPtr());
       if (right_sibling->GetNextPtr() != nullptr) {
@@ -1326,6 +1328,8 @@ class BPlusTree {
       RemoveFromLockList(right_sibling, locked_nodes);
       RemoveFromLockList(node, locked_nodes);
       delete right_sibling;
+    } else {
+      // Do Nothing
     }
 
     node_traceback->pop();
