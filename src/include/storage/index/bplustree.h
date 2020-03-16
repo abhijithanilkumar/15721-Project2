@@ -190,6 +190,7 @@ class BPlusTree {
      */
     ~LeafNode() override {
       entries_.clear();
+      entries_.shrink_to_fit();
       prev_ptr_ = nullptr;
       next_ptr_ = nullptr;
     }
@@ -522,6 +523,7 @@ class BPlusTree {
      */
     ~InnerNode() override {
       entries_.clear();
+      entries_.shrink_to_fit();
       prev_ptr_ = nullptr;
     }
 
@@ -1391,6 +1393,25 @@ class BPlusTree {
    * Root is never nullptr. Starts off as empty leaf node.
    */
   BPlusTree() { root_ = new LeafNode(); }
+
+  void DeleteTree(Node *node) {
+    if (node->GetSize() == 0) {
+      delete node;
+      return;
+    }
+
+    if (!node->IsLeaf()) {
+      DeleteTree(node->GetPrevPtr());
+      auto it = dynamic_cast<InnerNode *>(node)->GetEntriesBegin();
+      for (size_t i = 0; i < node->GetSize(); i++) {
+        DeleteTree((it + i)->second);
+      }
+    }
+
+    delete node;
+  }
+
+  ~BPlusTree() { DeleteTree(root_); }
 
   /*
    * Returns the root of the B+ tree
