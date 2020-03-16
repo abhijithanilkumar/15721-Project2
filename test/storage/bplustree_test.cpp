@@ -122,7 +122,7 @@ TEST_F(BPlusTreeTests, DuplicateInsert) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, MultiThreadedInsertTest) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
   std::vector<int64_t> keys;
@@ -157,8 +157,6 @@ TEST_F(BPlusTreeTests, MultiThreadedInsertTest) {
     EXPECT_EQ(results[0], keys[i]);
   }
 
-  // The root must have split
-  EXPECT_FALSE(tree->GetRoot()->IsLeaf());
   delete tree;
 }
 
@@ -483,7 +481,7 @@ TEST_F(BPlusTreeTests, BorrowFromLeafOnDelete) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, BorrowFromInner) {
-  const int key_num = 55;
+  const int key_num = FAN_OUT * (FAN_OUT / 2) + (FAN_OUT / 2);
   std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -549,7 +547,7 @@ TEST_F(BPlusTreeTests, BorrowFromInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, CoalesceToRightInner) {
-  const int key_num = 55;
+  const int key_num = FAN_OUT * (FAN_OUT / 2) + (FAN_OUT / 2);
   std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -560,20 +558,20 @@ TEST_F(BPlusTreeTests, CoalesceToRightInner) {
 
   // The root node should have split
   EXPECT_FALSE(tree->GetRoot()->IsLeaf());
-
   EXPECT_EQ(tree->GetHeightOfTree(), 3);
   EXPECT_EQ(tree->GetRoot()->GetSize(), 1);
 
   // Test Coalesce to right
-  EXPECT_TRUE(tree->Delete(50, 50));
+  const int to_be_deleted = FAN_OUT * (FAN_OUT / 2);
+  EXPECT_TRUE(tree->Delete(to_be_deleted, to_be_deleted));
   EXPECT_TRUE(tree->Delete(0, 0));
 
   EXPECT_EQ(tree->GetHeightOfTree(), 2);
   EXPECT_FALSE(tree->GetRoot()->IsLeaf());
 
   // Ensure all values are present
-  for (int i = 1; i < 55; i++) {
-    if (i == 50) continue;
+  for (int i = 1; i < key_num; i++) {
+    if (i == to_be_deleted) continue;
     results.clear();
     tree->GetValue(i, &results);
     EXPECT_EQ(results.size(), 1);
@@ -585,7 +583,7 @@ TEST_F(BPlusTreeTests, CoalesceToRightInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
-  const int key_num = 55;
+  const int key_num = FAN_OUT * (FAN_OUT / 2) + (FAN_OUT / 2);
   std::vector<int64_t> results;
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -602,14 +600,15 @@ TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
 
   // Test Coalesce to left
   EXPECT_TRUE(tree->Delete(0, 0));
-  EXPECT_TRUE(tree->Delete(50, 50));
+  const int to_be_deleted = FAN_OUT * (FAN_OUT / 2);
+  EXPECT_TRUE(tree->Delete(to_be_deleted, to_be_deleted));
 
   EXPECT_EQ(tree->GetHeightOfTree(), 2);
   EXPECT_FALSE(tree->GetRoot()->IsLeaf());
 
   // Ensure all values are present
-  for (int i = 1; i < 55; i++) {
-    if (i == 50) continue;
+  for (int i = 1; i < key_num; i++) {
+    if (i == to_be_deleted) continue;
     results.clear();
     tree->GetValue(i, &results);
     EXPECT_EQ(results.size(), 1);
@@ -621,7 +620,7 @@ TEST_F(BPlusTreeTests, CoalesceToLeftInner) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, RootInnerToLeaf) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -656,7 +655,7 @@ TEST_F(BPlusTreeTests, RootInnerToLeaf) {
 
 // NOLINTNEXTLINE
 TEST_F(BPlusTreeTests, MultiThreadedDeleteTest) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
   std::vector<int64_t> keys;
@@ -789,7 +788,7 @@ TEST_F(BPlusTreeTests, ScanAscendingInsertTwoLevelShuffled) {
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingInsertMultiLevelShuffled) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT * FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
 
@@ -840,8 +839,8 @@ TEST_F(BPlusTreeTests, ScanAscendingDeleteTwoLevelShuffled) {
   }
 
   int i = 0;
-  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i)
-    ;
+  for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++i) {
+  }
 
   EXPECT_EQ(i, key_num / 2);
 
@@ -849,7 +848,7 @@ TEST_F(BPlusTreeTests, ScanAscendingDeleteTwoLevelShuffled) {
 }
 
 TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
-  const int key_num = FAN_OUT * FAN_OUT * FAN_OUT;
+  const int key_num = FAN_OUT + FAN_OUT;
 
   auto *const tree = new BPlusTree<int64_t, int64_t>;
   EXPECT_TRUE(tree->CheckStructuralIntegrity());
@@ -882,8 +881,8 @@ TEST_F(BPlusTreeTests, ScanAscendingDeleteMultiLevelShuffled) {
     }
 
     int j = 0;
-    for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++j)
-      ;
+    for (auto it = tree->Begin(); !(it == tree->End()); ++it, ++j) {
+    }
 
     EXPECT_EQ(j, 3 * key_num - i - 1);
     EXPECT_TRUE(tree->CheckStructuralIntegrity());

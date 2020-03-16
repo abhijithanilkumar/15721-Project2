@@ -1,9 +1,8 @@
 #pragma once
 
+#include <deque>
 #include <functional>
 #include <iterator>
-#include <mutex>
-#include <queue>
 #include <stack>
 #include <unordered_set>
 #include <utility>
@@ -60,12 +59,12 @@ namespace terrier::storage::index {
  */
 
 // Set all constants for the bplus tree nodes
-#define FAN_OUT 10
+#define FAN_OUT 200
 // Ceil (FAN_OUT / 2) - 1
-#define MIN_KEYS_INNER_NODE 4
-#define MIN_PTR_INNER_NODE 5
+#define MIN_KEYS_INNER_NODE 99
+#define MIN_PTR_INNER_NODE 100
 // Ceil ((FAN_OUT - 1) / 2)
-#define MIN_KEYS_LEAF_NODE 5
+#define MIN_KEYS_LEAF_NODE 100
 
 /*
  * BPlusTree - Implementation of a B+ Tree index
